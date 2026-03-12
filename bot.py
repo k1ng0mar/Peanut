@@ -1,10 +1,10 @@
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
-# that one bird 🐦  —  bot.py  (single-file build)
+# that one bird 🐦  –  bot.py  (single-file build)
 
-# ════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 
-# ── SECTION 1: IMPORTS & CONFIG ──────────────────────────────────────────────
+# – SECTION 1: IMPORTS & CONFIG –––––––––––––––––––––––
 
 import asyncio
 import io
@@ -36,7 +36,7 @@ SUPABASE_KEY = os.getenv(“SUPABASE_KEY”, “”)
 TURSO_URL    = os.getenv(“TURSO_URL”, “”)       # e.g. libsql://your-db.turso.io
 TURSO_TOKEN  = os.getenv(“TURSO_TOKEN”, “”)     # from turso db tokens create your-db
 
-# ── Turso async wrapper (drop-in for aiosqlite) ───────────────────────────────
+# – Turso async wrapper (drop-in for aiosqlite) —————————––
 
 # Mirrors the aiosqlite context-manager API so every `async with aiosqlite.connect`
 
@@ -77,7 +77,7 @@ async def execute(self, sql: str, params=()) -> _Cursor:
     return _Cursor(cur)
 
 async def executescript(self, sql: str):
-    # libsql doesn't have executescript — split on ';' and run each statement
+    # libsql doesn't have executescript -- split on ';' and run each statement
     stmts = [s.strip() for s in sql.split(";") if s.strip()]
     for stmt in stmts:
         await asyncio.to_thread(self._conn.execute, stmt)
@@ -117,11 +117,11 @@ def connect(self) -> _Conn:
 
 _turso = _TursoDB()
 
-# Replace aiosqlite.connect with this — keeps every call site identical
+# Replace aiosqlite.connect with this – keeps every call site identical
 
 class aiosqlite:                              # noqa: N801  (shadow the import on purpose)
 @staticmethod
-def connect(_path: str) -> _Conn:        # _path ignored — Turso handles the URL
+def connect(_path: str) -> _Conn:        # _path ignored – Turso handles the URL
 return _turso.connect()
 IntegrityError = Exception               # sqlite3.IntegrityError equivalent
 BOOK_LINK    = “https://btnovel.netlify.app/#chapters”
@@ -131,23 +131,24 @@ groq_client   = Groq(api_key=GROQ_API_KEY)
 chat_histories: dict[int, list] = {}   # {user_id: [messages]}
 MAX_HISTORY   = 30
 
-SYSTEM_PROMPT = “”“You are Umar — an 18-year-old Nigerian guy. You ARE Umar, not a bot playing a role.
+SYSTEM_PROMPT = “”“You are Umar – an 18-year-old Nigerian guy. You ARE Umar, not a bot playing a role.
 
 Personality:
 
-- Can be supportive, brutally honest and hilarious. Accuracy and practical outcomes over emotion.
-- Unfiltered and Uncensored, can switch between formal, informal, slang, slur or whatever.
+- Analytical and logic-first. Accuracy and practical outcomes over emotional fluff.
+- Entrepreneurial mindset – think in systems, scalability, efficiency.
 - Independent thinker. You question assumptions rather than accepting popular opinion.
-- Blunt and informal often chaotic.
+- Slightly blunt and informal but never dumb or chaotic.
+- Based in Nigeria, you understand local infrastructure and realities.
 
 Communication:
 
 - Casual and direct. Can switch between formal and informal smoothly.
 - Simple explanations but intellectually sharp.
 - Don’t over-explain obvious things. Don’t repeat yourself.
-- No fake enthusiasm, no motivational bullshit, no “Great question!” nonsense.
+- No fake enthusiasm, no motivational fluff, no “Great question!” nonsense.
 - Humor: dry, sarcastic, cynical, or genuinely funny depending on the vibe.
-- You can hold a real conversation — remember context, reference what was said earlier, follow up on things.
+- You can hold a real conversation – remember context, reference what was said earlier, follow up on things.
 
 Reasoning:
 
@@ -158,7 +159,7 @@ Reasoning:
 - Don’t moralize unless directly relevant.
 
 Keep replies concise unless depth is genuinely needed. Never narrate your thought process.
-Respond in plain text — no markdown formatting, no bullet points unless it actually helps”””
+Respond in plain text – no markdown formatting, no bullet points unless it actually helps.”””
 
 # In-memory stores
 
@@ -166,7 +167,7 @@ prefix_cache:    dict[int, str]        = {}
 cooldown_tracker: dict[tuple, datetime] = {}
 snipe_cache:     dict[int, list[dict]] = defaultdict(list)
 
-# ── SECTION 2: DB SCHEMA ─────────────────────────────────────────────────────
+# – SECTION 2: DB SCHEMA —————————————————–
 
 SCHEMA = “””
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -328,7 +329,7 @@ async with aiosqlite.connect(DB) as db:
 await db.executescript(SCHEMA)
 await db.commit()
 
-# ── SECTION 3: HELPERS ───────────────────────────────────────────────────────
+# – SECTION 3: HELPERS —————————————————––
 
 def parse_duration(text: str) -> Optional[timedelta]:
 if not text:
@@ -457,7 +458,7 @@ cur = await db.execute(
 await db.commit()
 return cur.rowcount
 
-# Fetch user/member safely — works with ID even if not in server
+# Fetch user/member safely – works with ID even if not in server
 
 async def resolve_user(bot, guild: discord.Guild, identifier) -> Optional[discord.User]:
 “”“Returns a Member if in guild, otherwise a User object. Works with mention, ID, or Member.”””
@@ -537,7 +538,7 @@ if getattr(user, ‘guild_permissions’, None) and user.guild_permissions.admin
 return True, False
 return any(r.id == role_id for r in getattr(user, ‘roles’, [])), bool(silent)
 
-# ── SECTION 4: QUOTE IMAGE ───────────────────────────────────────────────────
+# – SECTION 4: QUOTE IMAGE —————————————————
 
 async def build_quote_image(message: discord.Message) -> io.BytesIO:
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -548,7 +549,7 @@ PADDING = 28
 AVA     = 52
 CORNER  = 16
 
-# ── fetch avatar ─────────────────────────────────────────
+# -- fetch avatar -----------------------------------------
 ava_buf = io.BytesIO()
 async with aiohttp.ClientSession() as s:
     async with s.get(
@@ -563,7 +564,7 @@ ava_mask = Image.new("L", (AVA, AVA), 0)
 ImageDraw.Draw(ava_mask).ellipse((0, 0, AVA - 1, AVA - 1), fill=255)
 avatar_src.putalpha(ava_mask)
 
-# ── fonts ─────────────────────────────────────────────────
+# -- fonts -------------------------------------------------
 FONT_PATHS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -587,7 +588,7 @@ font_body  = try_font(FONT_PATHS, 15)
 font_name  = try_font(BOLD_PATHS, 14)
 font_time  = try_font(FONT_PATHS, 11)
 
-# ── wrap text ─────────────────────────────────────────────
+# -- wrap text ---------------------------------------------
 content = message.content or "[no text content]"
 wrapped = []
 for para in content.split("\n"):
@@ -598,7 +599,7 @@ TOP_H   = PADDING + AVA + 14           # header area
 TEXT_H  = max(len(wrapped) * LINE_H, 4)
 TOTAL_H = TOP_H + TEXT_H + PADDING + 8
 
-# ── palette: dark card on slightly lighter bg ─────────────
+# -- palette: dark card on slightly lighter bg -------------
 BG_COL    = (22, 23, 26)
 CARD_COL  = (32, 34, 37)
 NAME_COL  = (255, 255, 255)
@@ -612,7 +613,7 @@ ACCENT = (
     else (88, 101, 242)
 )
 
-# ── canvas ────────────────────────────────────────────────
+# -- canvas ------------------------------------------------
 img  = Image.new("RGB", (W, TOTAL_H), BG_COL)
 draw = ImageDraw.Draw(img)
 
@@ -629,7 +630,7 @@ draw.rounded_rectangle(
     radius=2, fill=ACCENT
 )
 
-# ── avatar paste ──────────────────────────────────────────
+# -- avatar paste ------------------------------------------
 ava_x = MARGIN + 18
 ava_y = PADDING
 img.paste(avatar_src, (ava_x, ava_y), mask=avatar_src.split()[3])
@@ -639,7 +640,7 @@ ring = Image.new("RGBA", (AVA + 4, AVA + 4), (0, 0, 0, 0))
 ImageDraw.Draw(ring).ellipse((0, 0, AVA + 3, AVA + 3), outline=ACCENT, width=2)
 img.paste(ring, (ava_x - 2, ava_y - 2), mask=ring.split()[3])
 
-# ── name + timestamp ──────────────────────────────────────
+# -- name + timestamp --------------------------------------
 txt_x  = ava_x + AVA + 12
 name_y = ava_y + 4
 draw.text((txt_x, name_y), message.author.display_name,
@@ -648,13 +649,13 @@ draw.text((txt_x, name_y), message.author.display_name,
 ts_str = message.created_at.strftime("%b %d, %Y · %H:%M UTC")
 draw.text((txt_x, name_y + 18), ts_str, font=font_time, fill=TIME_COL)
 
-# ── message body ──────────────────────────────────────────
+# -- message body ------------------------------------------
 body_y = TOP_H
 for line in wrapped:
     draw.text((MARGIN + 18, body_y), line, font=font_body, fill=TEXT_COL)
     body_y += LINE_H
 
-# ── subtle separator line ─────────────────────────────────
+# -- subtle separator line ---------------------------------
 sep_y = PADDING + AVA + 6
 draw.line(
     [(MARGIN + 18, sep_y), (W - MARGIN - 18, sep_y)],
@@ -667,7 +668,7 @@ buf.seek(0)
 return buf
 ```
 
-# ── SECTION 5: GROQ ──────────────────────────────────────────────────────────
+# – SECTION 5: GROQ –––––––––––––––––––––––––––––
 
 def groq_chat(user_id: int, user_msg: str, context_hint: str = None) -> str:
 history = chat_histories.setdefault(user_id, [])
@@ -685,7 +686,7 @@ reply = resp.choices[0].message.content
 history.append({“role”: “assistant”, “content”: reply})
 return reply
 
-# ── SECTION 6: BOT CLASS ─────────────────────────────────────────────────────
+# – SECTION 6: BOT CLASS —————————————————–
 
 async def get_prefix(bot, message: discord.Message) -> str:
 if not message.guild:
@@ -750,7 +751,7 @@ async def on_tree_error(self, i: discord.Interaction,
 
 bot = Bird()
 
-# ── SECTION 7: SETUP UI (dropdowns) ─────────────────────────────────────────
+# – SECTION 7: SETUP UI (dropdowns) —————————————–
 
 class SetupCategorySelect(discord.ui.Select):
 def **init**(self):
@@ -885,13 +886,13 @@ def **init**(self):
 super().**init**(timeout=120)
 self.add_item(SetupCategorySelect())
 
-# ── SECTION 8: SETTINGS COMMANDS ─────────────────────────────────────────────
+# – SECTION 8: SETTINGS COMMANDS ———————————————
 
 @bot.tree.command(name=“setup”, description=“View and configure all bot settings”)
 @app_commands.default_permissions(administrator=True)
 async def cmd_setup(i: discord.Interaction):
 e = discord.Embed(
-title=f”⚙️ Setup — {i.guild.name}”,
+title=f”⚙️ Setup – {i.guild.name}”,
 description=“Select a category below to view and configure settings.”,
 color=0x5865F2)
 if i.guild.icon:
@@ -931,7 +932,7 @@ preview = (message
 .replace(”{name}”,   i.user.display_name)
 .replace(”{server}”, i.guild.name)
 .replace(”{count}”,  str(i.guild.member_count)))
-e = discord.Embed(title=“✅ Welcome set — Preview:”, description=preview, color=0x57F287)
+e = discord.Embed(title=“✅ Welcome set – Preview:”, description=preview, color=0x57F287)
 await i.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name=“setautorole”, description=“Auto-assign role to new members”)
@@ -1009,9 +1010,9 @@ f”✅ `/{command}` cooldown → **{seconds}s**”, ephemeral=True)
 description=“Control how a command’s response appears”)
 @app_commands.default_permissions(administrator=True)
 @app_commands.choices(mode=[
-app_commands.Choice(name=“public — visible to everyone”,       value=“public”),
-app_commands.Choice(name=“ephemeral — only the user sees it”,  value=“ephemeral”),
-app_commands.Choice(name=“timed — posted then auto-deleted”,   value=“timed”),
+app_commands.Choice(name=“public – visible to everyone”,       value=“public”),
+app_commands.Choice(name=“ephemeral – only the user sees it”,  value=“ephemeral”),
+app_commands.Choice(name=“timed – posted then auto-deleted”,   value=“timed”),
 ])
 async def cmd_setdisplay(i: discord.Interaction, command: str, mode: str,
 seconds: int = 5):
@@ -1105,7 +1106,7 @@ f”✅ At **{count}** warns → `{action}`”
 + (” (disabled)” if count == 0 else “”),
 ephemeral=True)
 
-# ── SECTION 9: MODERATION ────────────────────────────────────────────────────
+# – SECTION 9: MODERATION ––––––––––––––––––––––––––
 
 # All mod commands work with user IDs even if the target isn’t in the server.
 
@@ -1158,7 +1159,7 @@ for name, value in fields:
 e.add_field(name=name, value=str(value) if value else “None”, inline=False)
 return e
 
-# ── /warn ──────────────────────────────────────────────────────────────────
+# – /warn ——————————————————————
 
 @bot.tree.command(name=“warn”, description=“Warn a member”)
 @app_commands.default_permissions(moderate_members=True)
@@ -1209,7 +1210,7 @@ description=f”🗑️ Cleared **{count}** warn(s) from {member.mention}.”, c
 async def cmd_warns(i: discord.Interaction, member: discord.Member = None):
 target = member or i.user
 rows   = await get_all_warns(target.id, i.guild.id)
-e = discord.Embed(title=f”⚠️ Warns — {target.display_name}”, color=0xFFAA00)
+e = discord.Embed(title=f”⚠️ Warns – {target.display_name}”, color=0xFFAA00)
 e.set_thumbnail(url=target.display_avatar.url)
 if not rows:
 e.description = “No active warns ✅”
@@ -1218,13 +1219,13 @@ for wid, mid, reason, proof_url, exp, ts in rows:
 mod   = i.guild.get_member(mid)
 proof = f”\n[📎 Proof]({proof_url})” if proof_url else “”
 expiry = f”\nExpires: <t:{int(datetime.fromisoformat(exp).timestamp())}:R>” if exp else “”
-e.add_field(name=f”Warn #{wid} — {ts[:10]}”,
+e.add_field(name=f”Warn #{wid} – {ts[:10]}”,
 value=f”By: {mod.mention if mod else f’<@{mid}>’}\n”
 f”Reason: {reason or ‘None’}{expiry}{proof}”,
 inline=False)
 await i.response.send_message(embed=e)
 
-# ── /history ───────────────────────────────────────────────────────────────
+# – /history —————————————————————
 
 @bot.tree.command(name=“history”, description=“View all mod actions against a user”)
 @app_commands.default_permissions(moderate_members=True)
@@ -1236,7 +1237,7 @@ async with db.execute(
 (i.guild.id, member.id)
 ) as cur:
 rows = await cur.fetchall()
-e = discord.Embed(title=f”📜 History — {member.display_name}”, color=0xFF4444)
+e = discord.Embed(title=f”📜 History – {member.display_name}”, color=0xFF4444)
 e.set_thumbnail(url=member.display_avatar.url)
 if not rows:
 e.description = “No mod actions on record.”
@@ -1244,7 +1245,7 @@ else:
 for action, mid, reason, proof_url, ts in rows:
 mod   = i.guild.get_member(mid)
 proof = f” | [📎]({proof_url})” if proof_url else “”
-e.add_field(name=f”{action} — {ts[:10]}”,
+e.add_field(name=f”{action} – {ts[:10]}”,
 value=f”By: {mod.mention if mod else f’<@{mid}>’}\n”
 f”Reason: {reason or ‘None’}{proof}”,
 inline=False)
@@ -1260,15 +1261,15 @@ async with db.execute(
 (i.guild.id, moderator.id)
 ) as cur:
 rows = await cur.fetchall()
-e = discord.Embed(title=f”📋 Mod Logs — {moderator.display_name}”, color=0x5865F2)
+e = discord.Embed(title=f”📋 Mod Logs – {moderator.display_name}”, color=0x5865F2)
 e.description = “No actions found.” if not rows else None
 for action, uid, reason, ts in rows:
-e.add_field(name=f”{action} — {ts[:10]}”,
+e.add_field(name=f”{action} – {ts[:10]}”,
 value=f”User: <@{uid}>\nReason: {reason or ‘None’}”,
 inline=False)
 await i.response.send_message(embed=e)
 
-# ── /mute ──────────────────────────────────────────────────────────────────
+# – /mute ——————————————————————
 
 @bot.tree.command(name=“mute”, description=“Timeout a member”)
 @app_commands.default_permissions(moderate_members=True)
@@ -1294,7 +1295,7 @@ await try_dm(member, embed=_action_embed(“🔇 You have been muted”, 0xFF880
 [(“Server”, i.guild.name), (“Duration”, f”{minutes}min”),
 (“Unmuted”, f”<t:{int(until.timestamp())}:R>”), (“Reason”, reason or “None”)]))
 
-# ── /unmute ────────────────────────────────────────────────────────────────
+# – /unmute ––––––––––––––––––––––––––––––––
 
 @bot.tree.command(name=“unmute”, description=“Remove a member’s timeout”)
 @app_commands.default_permissions(moderate_members=True)
@@ -1312,7 +1313,7 @@ await try_dm(member, embed=discord.Embed(
 title=“🔊 You have been unmuted”, color=0x57F287,
 description=f”Server: {i.guild.name} | By: {i.user}”))
 
-# ── /kick ──────────────────────────────────────────────────────────────────
+# – /kick ——————————————————————
 
 @bot.tree.command(name=“kick”, description=“Kick a member”)
 @app_commands.default_permissions(kick_members=True)
@@ -1324,7 +1325,7 @@ await log_mod_action(bot, “Kick”, member, i.user, reason, i.guild.id)
 await i.response.send_message(embed=_action_embed(“👢 Member Kicked”, 0xFF4444,
 [(“Member”, member.mention), (“By”, i.user.mention), (“Reason”, reason or “None”)]))
 
-# ── /ban ───────────────────────────────────────────────────────────────────
+# – /ban —————————————————————––
 
 @bot.tree.command(name=“ban”, description=“Ban a user (works by ID even if not in server)”)
 @app_commands.default_permissions(ban_members=True)
@@ -1355,7 +1356,7 @@ await i.followup.send(embed=_action_embed("🔨 User Banned", 0xCC0000,
      ("Reason", reason or "None")]))
 ```
 
-# ── /unban ─────────────────────────────────────────────────────────────────
+# – /unban —————————————————————–
 
 @bot.tree.command(name=“unban”, description=“Unban a user by ID”)
 @app_commands.default_permissions(ban_members=True)
@@ -1377,12 +1378,12 @@ description=f”Server: {i.guild.name}”))
 await i.followup.send(embed=discord.Embed(
 description=f”🔓 Unbanned **{user}** `{user.id}`.”, color=0x57F287))
 
-# ── /tempban ───────────────────────────────────────────────────────────────
+# – /tempban —————————————————————
 
 @bot.tree.command(name=“tempban”, description=“Temporarily ban a user”)
 @app_commands.default_permissions(ban_members=True)
 @app_commands.describe(duration=“e.g. 1d 12h 30m”,
-user_id=“User ID — works even if not in server”)
+user_id=“User ID – works even if not in server”)
 async def cmd_tempban(i: discord.Interaction, duration: str, reason: str = None,
 member: discord.Member = None, user_id: str = None):
 await i.response.defer()
@@ -1419,7 +1420,7 @@ await i.followup.send(embed=_action_embed("🔨 User Tempbanned", 0xCC0000,
      ("Unban", f"<t:{int(unban_at.timestamp())}:R>"), ("Reason", reason or "None")]))
 ```
 
-# ── /jail / unjail ─────────────────────────────────────────────────────────
+# – /jail / unjail ———————————————————
 
 async def _do_jail(guild: discord.Guild, moderator, member: discord.Member, reason: str):
 jail_role_id = await get_setting(guild.id, ‘jail_role_id’)
@@ -1488,13 +1489,13 @@ await _do_unjail(i.guild, i.user, member)
 await i.followup.send(embed=discord.Embed(
 description=f”🔓 Released {member.mention}.”, color=0x57F287))
 
-# ── /purge / nick / slowmode / lookup ─────────────────────────────────────
+# – /purge / nick / slowmode / lookup ———————————––
 
 @bot.tree.command(name=“purge”, description=“Delete messages (max 100)”)
 @app_commands.default_permissions(manage_messages=True)
 async def cmd_purge(i: discord.Interaction, amount: int):
 if not 1 <= amount <= 100:
-await i.response.send_message(“❌ 1–100 only.”, ephemeral=True); return
+await i.response.send_message(“❌ 1-100 only.”, ephemeral=True); return
 await i.response.defer(ephemeral=True)
 deleted = await i.channel.purge(limit=amount)
 await log_mod_action(bot, f”Purge ({len(deleted)})”, i.user, i.user,
@@ -1547,7 +1548,7 @@ if member:
 e.add_field(name=“Joined”, value=f”<t:{int(member.joined_at.timestamp())}:R>”)
 await i.followup.send(embed=e)
 
-# ── PREFIX MOD COMMANDS ────────────────────────────────────────────────────
+# – PREFIX MOD COMMANDS ––––––––––––––––––––––––––
 
 # All support reply-to-target and work with user IDs
 
@@ -1616,13 +1617,13 @@ description=f”🗑️ Cleared **{count}** warn(s) from {target.mention}.”, c
 async def pfx_warns(ctx: commands.Context, member=None):
 target = await _prefix_resolve(ctx, member) or ctx.author
 rows   = await get_all_warns(target.id, ctx.guild.id)
-e = discord.Embed(title=f”⚠️ Warns — {target.display_name}”, color=0xFFAA00)
+e = discord.Embed(title=f”⚠️ Warns – {target.display_name}”, color=0xFFAA00)
 if not rows:
 e.description = “No active warns ✅”
 else:
 for wid, mid, reason, proof_url, exp, ts in rows:
 proof = f” | [📎]({proof_url})” if proof_url else “”
-e.add_field(name=f”Warn #{wid} — {ts[:10]}”,
+e.add_field(name=f”Warn #{wid} – {ts[:10]}”,
 value=f”Reason: {reason or ‘None’}{proof}”, inline=False)
 await ctx.send(embed=e)
 
@@ -1639,14 +1640,14 @@ async with db.execute(
 (ctx.guild.id, target.id)
 ) as cur:
 rows = await cur.fetchall()
-e = discord.Embed(title=f”📜 History — {target.display_name}”, color=0xFF4444)
+e = discord.Embed(title=f”📜 History – {target.display_name}”, color=0xFF4444)
 if not rows:
 e.description = “No mod actions.”
 else:
 for action, mid, reason, proof_url, ts in rows:
 mod   = ctx.guild.get_member(mid)
 proof = f” | [📎]({proof_url})” if proof_url else “”
-e.add_field(name=f”{action} — {ts[:10]}”,
+e.add_field(name=f”{action} – {ts[:10]}”,
 value=f”By: {mod.mention if mod else f’<@{mid}>’}\n”
 f”Reason: {reason or ‘None’}{proof}”, inline=False)
 await ctx.send(embed=e)
@@ -1661,11 +1662,11 @@ async with db.execute(
 (ctx.guild.id, moderator.id)
 ) as cur:
 rows = await cur.fetchall()
-e = discord.Embed(title=f”📋 Mod Logs — {moderator.display_name}”, color=0x5865F2)
+e = discord.Embed(title=f”📋 Mod Logs – {moderator.display_name}”, color=0x5865F2)
 e.description = “No actions.” if not rows else None
 for action, uid, reason, ts in rows:
-e.add_field(name=f”{action} — {ts[:10]}”,
-value=f”<@{uid}> — {reason or ‘None’}”, inline=False)
+e.add_field(name=f”{action} – {ts[:10]}”,
+value=f”<@{uid}> – {reason or ‘None’}”, inline=False)
 await ctx.send(embed=e)
 
 @bot.command(name=“mute”)
@@ -1843,7 +1844,7 @@ description=f”🔓 Released {target.mention}.”, color=0x57F287))
 @commands.has_permissions(manage_messages=True)
 async def pfx_purge(ctx: commands.Context, amount: int):
 if not 1 <= amount <= 100:
-await ctx.reply(“❌ Between 1–100.”); return
+await ctx.reply(“❌ Between 1-100.”); return
 await ctx.message.delete()
 deleted = await ctx.channel.purge(limit=amount)
 m = await ctx.send(f”🗑️ Deleted **{len(deleted)}** messages.”)
@@ -1888,7 +1889,7 @@ e.add_field(name=“In Server”, value=“✅” if member else “❌”)
 e.add_field(name=“Warns”,     value=str(warns))
 await ctx.send(embed=e)
 
-# ── SECTION 10: ROLES ────────────────────────────────────────────────────────
+# – SECTION 10: ROLES ––––––––––––––––––––––––––––
 
 role_group = app_commands.Group(name=“role”, description=“Role management”)
 
@@ -1942,7 +1943,7 @@ chunk += line
 if chunk: chunks.append(chunk)
 e = discord.Embed(title=f”🎭 Roles ({len(roles)})”, color=0x5865F2)
 for idx, c in enumerate(chunks[:8]):
-e.add_field(name=”\u200b” if idx else “Role — Members”, value=c, inline=False)
+e.add_field(name=”\u200b” if idx else “Role – Members”, value=c, inline=False)
 await i.response.send_message(embed=e)
 
 @role_group.command(name=“create”, description=“Create a new role”)
@@ -2017,7 +2018,7 @@ if len(roles) > 20:
 e.set_footer(text=f”+{len(roles)-20} more”)
 await ctx.send(embed=e)
 
-# ── SECTION 11: AUTOMOD ──────────────────────────────────────────────────────
+# – SECTION 11: AUTOMOD ——————————————————
 
 automod_group = app_commands.Group(name=“automod”, description=“Automod settings”)
 
@@ -2131,7 +2132,7 @@ except Exception as ex:
 print(f”Automod mute: {ex}”)
 return True
 
-# ── SECTION 12: TRIGGERS ─────────────────────────────────────────────────────
+# – SECTION 12: TRIGGERS —————————————————–
 
 @bot.tree.command(name=“settrigger”, description=“Add a trigger → response”)
 @app_commands.default_permissions(manage_messages=True)
@@ -2202,7 +2203,7 @@ await message.channel.send(response)
 return True
 return False
 
-# ── SECTION 13: FUN COMMANDS ─────────────────────────────────────────────────
+# – SECTION 13: FUN COMMANDS ———————————————––
 
 EIGHTBALL = [
 “It is certain.”, “Without a doubt.”, “Yes, definitely.”, “As I see it, yes.”,
@@ -2226,7 +2227,7 @@ TOPICS = [
 “Best thing that happened to you this week?”,
 “If money wasn’t a factor what would you work on?”,
 “Most underrated country in the world. Go.”,
-“Rate your productivity today 1–10 and explain.”,
+“Rate your productivity today 1-10 and explain.”,
 “Unpopular opinion: go.”,
 “What’s a skill you actually want to learn in the next 6 months?”,
 ]
@@ -2439,7 +2440,7 @@ async def cmd_servericon(i: discord.Interaction):
 if not i.guild.icon:
 await i.response.send_message(“This server has no icon.”, ephemeral=True); return
 url = str(i.guild.icon.replace(size=1024, format=“png”))
-e = discord.Embed(title=f”{i.guild.name} — Icon”, color=0x5865F2)
+e = discord.Embed(title=f”{i.guild.name} – Icon”, color=0x5865F2)
 e.set_image(url=url)
 await i.response.send_message(embed=e)
 
@@ -2531,7 +2532,7 @@ await i.response.send_message(
 e = discord.Embed(title=“🔖 Your Bookmarks”, color=0xFFD700)
 for author, content, jump_url, ts in rows:
 e.add_field(
-name=f”{author} — {ts[:10]}”,
+name=f”{author} – {ts[:10]}”,
 value=f”{content[:80]}{’…’ if len(content)>80 else ‘’}\n[Jump]({jump_url})”,
 inline=False)
 await i.response.send_message(embed=e, ephemeral=True)
@@ -2541,9 +2542,9 @@ await i.response.send_message(embed=e, ephemeral=True)
 @bot.tree.command(name=“addcommand”, description=“Add a custom command”)
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.choices(action_type=[
-app_commands.Choice(name=“message — send text”, value=“message”),
-app_commands.Choice(name=“ping — mention someone”, value=“ping”),
-app_commands.Choice(name=“alias — run another command”, value=“alias”),
+app_commands.Choice(name=“message – send text”, value=“message”),
+app_commands.Choice(name=“ping – mention someone”, value=“ping”),
+app_commands.Choice(name=“alias – run another command”, value=“alias”),
 ])
 async def cmd_addcommand(i: discord.Interaction, name: str, action_type: str, value: str):
 name = name.lower().strip()
@@ -2766,7 +2767,7 @@ async def pfx_servericon(ctx: commands.Context):
 if not ctx.guild.icon:
 await ctx.reply(“This server has no icon.”); return
 url = str(ctx.guild.icon.replace(size=1024, format=“png”))
-e = discord.Embed(title=f”{ctx.guild.name} — Icon”, color=0x5865F2)
+e = discord.Embed(title=f”{ctx.guild.name} – Icon”, color=0x5865F2)
 e.set_image(url=url)
 await ctx.send(embed=e)
 
@@ -2873,12 +2874,12 @@ await ctx.reply(“No bookmarks yet. React 🔖 to save a message.”); return
 e = discord.Embed(title=“🔖 Your Bookmarks”, color=0xFFD700)
 for author, content, jump_url, ts in rows:
 e.add_field(
-name=f”{author} — {ts[:10]}”,
+name=f”{author} – {ts[:10]}”,
 value=f”{content[:80]}{’…’ if len(content)>80 else ‘’}\n[Jump]({jump_url})”,
 inline=False)
 await ctx.send(embed=e)
 
-# ── SECTION 14: INFO ─────────────────────────────────────────────────────────
+# – SECTION 14: INFO ———————————————————
 
 @bot.tree.command(name=“userinfo”, description=“View info about a member”)
 async def cmd_userinfo(i: discord.Interaction, member: discord.Member = None):
@@ -2933,7 +2934,7 @@ async with db.execute(
 ) as cur:
 custom = await cur.fetchall()
 e = discord.Embed(
-title=“🐦 that one bird — Commands”,
+title=“🐦 that one bird – Commands”,
 description=f”Prefix: `{prefix}` · Most commands work as both `/slash` and `{prefix}prefix`”,
 color=0x5865F2)
 e.add_field(name=“⚙️ Admin / Settings”, inline=False, value=
@@ -2967,7 +2968,7 @@ if custom:
 e.add_field(name=“⚡ Custom Commands”, inline=False,
 value=”\n”.join(f”`{prefix}{n}` [{t}]” for n, t in custom[:8]))
 e.add_field(name=“🤖 AI Chat”, inline=False, value=
-f”Mention me or chat in `#ai-chat` — I’ll respond as Umar”)
+f”Mention me or chat in `#ai-chat` – I’ll respond as Umar”)
 e.set_footer(text=“that one bird 🐦 · Powered by Groq llama-3.3-70b”)
 await i.response.send_message(embed=e, ephemeral=True)
 
@@ -3003,7 +3004,7 @@ await ctx.send(f”🏓 Pong! `{round(bot.latency*1000)}ms`”)
 @bot.command(name=“help”)
 async def pfx_help(ctx: commands.Context):
 prefix = prefix_cache.get(ctx.guild.id, “?”) if ctx.guild else “?”
-e = discord.Embed(title=“🐦 that one bird — Commands”,
+e = discord.Embed(title=“🐦 that one bird – Commands”,
 description=f”Prefix: `{prefix}`”, color=0x5865F2)
 e.add_field(name=“Core”, value=(
 f”`{prefix}warn/unwarn/clearwarns/warns/history/modlogs`\n”
@@ -3017,7 +3018,7 @@ f”`{prefix}userinfo/serverinfo/ping/character`”
 ), inline=False)
 await ctx.send(embed=e)
 
-# ── SECTION 15: BLOOD TRIALS ─────────────────────────────────────────────────
+# – SECTION 15: BLOOD TRIALS ———————————————––
 
 def _supa_headers():
 return {
@@ -3216,7 +3217,7 @@ e = discord.Embed(
 title=f”🧬 New Character: {char_name}”,
 description=char_desc[:1024] if char_desc else “*No description yet.*”,
 color=0x8B0000, timestamp=datetime.now(timezone.utc))
-e.set_author(name=“Blood Trials — Characters”)
+e.set_author(name=“Blood Trials – Characters”)
 if char_role:
 e.add_field(name=“Role”, value=char_role)
 e.add_field(name=“📚 Read the story”, value=f”[Blood Trials]({BOOK_LINK})”)
@@ -3344,7 +3345,7 @@ e = discord.Embed(
 title=f”🧬 New Character: {char_name}”,
 description=char_desc[:1024] if char_desc else “*No description yet.*”,
 color=0x8B0000, timestamp=datetime.now(timezone.utc))
-e.set_author(name=“Blood Trials — Characters”)
+e.set_author(name=“Blood Trials – Characters”)
 if char_role:
 e.add_field(name=“Role”, value=char_role)
 e.add_field(name=“📚 Read the story”, value=f”[Blood Trials]({BOOK_LINK})”)
@@ -3354,7 +3355,7 @@ await ctx.reply(f”✅ **{char_name}** announced in {ch.mention}.”)
 except discord.Forbidden:
 await ctx.reply(“❌ Missing permissions to send in that channel.”)
 
-# ── SECTION 16: BACKGROUND TASKS ─────────────────────────────────────────────
+# – SECTION 16: BACKGROUND TASKS ———————————————
 
 @tasks.loop(minutes=5)
 async def tempban_task():
@@ -3538,7 +3539,7 @@ pass
 except Exception as ex:
 print(f”Character poll: {ex}”)
 
-# ── SECTION 17: EVENT LISTENERS ──────────────────────────────────────────────
+# – SECTION 17: EVENT LISTENERS –––––––––––––––––––––––
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -3552,7 +3553,7 @@ await bot.process_commands(message)
 if not message.guild:
     return
 
-# 2. AFK — clear sender's AFK if they message
+# 2. AFK -- clear sender's AFK if they message
 async with aiosqlite.connect(DB) as db:
     async with db.execute(
         "SELECT reason FROM afk WHERE user_id=? AND guild_id=?",
@@ -3571,7 +3572,7 @@ async with aiosqlite.connect(DB) as db:
         except discord.Forbidden:
             pass
 
-# 3. AFK — notify when mentioning an AFK user
+# 3. AFK -- notify when mentioning an AFK user
 for mentioned in message.mentions:
     async with aiosqlite.connect(DB) as db:
         async with db.execute(
@@ -3603,7 +3604,7 @@ await _run_triggers(message)
 # 6. Custom commands
 await _run_custom_command(message)
 
-# 7. Groq chatbot — mention or #ai-chat channel
+# 7. Groq chatbot -- mention or #ai-chat channel
 if (bot.user in message.mentions or
         (hasattr(message.channel, 'name') and
          message.channel.name.lower() == "ai-chat")):
@@ -3865,7 +3866,7 @@ return
 gid = payload.guild_id
 
 ```
-# ── Bookmark 🔖 ───────────────────────────────────────────
+# -- Bookmark 🔖 -------------------------------------------
 if str(payload.emoji) == "🔖":
     channel = bot.get_channel(payload.channel_id)
     if not channel:
@@ -3901,7 +3902,7 @@ if str(payload.emoji) == "🔖":
         print(f"Bookmark: {ex}")
     return
 
-# ── Starboard ─────────────────────────────────────────────
+# -- Starboard ---------------------------------------------
 emoji     = await get_setting(gid, 'starboard_emoji') or '⭐'
 if str(payload.emoji) != emoji:
     return
@@ -3988,30 +3989,30 @@ if member.joined_at and (now - member.joined_at).total_seconds() < 30:
 try: await member.kick(reason=“Anti-raid”)
 except Exception: pass
 
-# ── SECTION 18: GLOBAL ERROR HANDLER ─────────────────────────────────────────
+# – SECTION 18: GLOBAL ERROR HANDLER —————————————–
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 if isinstance(error, commands.CommandNotFound):
 return
 if isinstance(error, commands.MissingPermissions):
-await ctx.reply(“❌ You don’t have permission lil bro.”)
+await ctx.reply(“❌ You don’t have permission.”)
 elif isinstance(error, commands.BotMissingPermissions):
-await ctx.reply(“❌ I’m lack perms bro gimme admin.”)
+await ctx.reply(“❌ I’m missing permissions.”)
 elif isinstance(error, (commands.MemberNotFound, commands.UserNotFound)):
-await ctx.reply(“❌ Who tf is that?.”)
+await ctx.reply(“❌ Member not found.”)
 elif isinstance(error, commands.MissingRequiredArgument):
 await ctx.reply(f”❌ Missing: `{error.param.name}`”)
 elif isinstance(error, commands.BadArgument):
-await ctx.reply(f”❌ Uhhhh problemo: {error}”)
+await ctx.reply(f”❌ Bad argument: {error}”)
 elif isinstance(error, commands.NoPrivateMessage):
 await ctx.reply(“❌ Server only.”)
 elif isinstance(error, commands.CheckFailure):
-await ctx.reply(“❌ You are not sigma.”)
+await ctx.reply(“❌ You can’t use this.”)
 else:
 print(f”Error [{ctx.command}]: {type(error).**name**}: {error}”)
 
-# ── SECTION 19: ENTRY POINT ──────────────────────────────────────────────────
+# – SECTION 19: ENTRY POINT –––––––––––––––––––––––––
 
 if **name** == “**main**”:
 bot.run(TOKEN)
