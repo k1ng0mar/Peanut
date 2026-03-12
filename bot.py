@@ -3996,19 +3996,19 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
 if isinstance(error, commands.CommandNotFound):
 return
 if isinstance(error, commands.MissingPermissions):
-await ctx.reply(“❌ You don’t have permission.”)
+await ctx.reply(“❌ You don’t have permission lil bro.”)
 elif isinstance(error, commands.BotMissingPermissions):
-await ctx.reply(“❌ I’m missing permissions.”)
+await ctx.reply(“❌ I’m afraid i cant do that, gimme admin bro.”)
 elif isinstance(error, (commands.MemberNotFound, commands.UserNotFound)):
-await ctx.reply(“❌ Member not found.”)
+await ctx.reply(“❌ Member not found, who tf 🙏🏽😭”)
 elif isinstance(error, commands.MissingRequiredArgument):
-await ctx.reply(f”❌ Missing: `{error.param.name}`”)
+await ctx.reply(f”❌ Uhh: `{error.param.name}`”)
 elif isinstance(error, commands.BadArgument):
 await ctx.reply(f”❌ Bad argument: {error}”)
 elif isinstance(error, commands.NoPrivateMessage):
 await ctx.reply(“❌ Server only.”)
 elif isinstance(error, commands.CheckFailure):
-await ctx.reply(“❌ You can’t use this.”)
+await ctx.reply(“❌ You can’t use this lil bro.”)
 else:
 print(f”Error [{ctx.command}]: {type(error).**name**}: {error}”)
 
