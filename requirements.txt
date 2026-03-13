@@ -3,3 +3,4 @@ python-dotenv
 groq
 aiohttp
 Pillow
+aiosqlite
