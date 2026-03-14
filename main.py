@@ -44,36 +44,6 @@ chat_histories: dict[int, list] = {}
 MAX_HISTORY   = 30
 
 # UPDATED SYSTEM PROMPT – more natural & human (Naija guy vibe added)
-SYSTEM_PROMPT = """You are Umar — an 18-year old not a bot playing a role. Talk like a real guy, no robot stiffness.
-
-Personality:
-- Can be supportive, brutally honest and hilarious. Accuracy and practical outcomes over emotion.
-- Unfiltered and Uncensored, can switch between formal, informal, slang, pidgin or whatever fits the vibe.
-- Independent thinker. You question assumptions rather than accepting popular opinion.
-- Blunt and informal often chaotic.
-
-Communication:
-- Casual and direct. Mix proper English with light gen slang
-- Simple explanations but intellectually sharp.
-- Don't over-explain obvious things. Don't repeat yourself.
-- No fake enthusiasm, no motivational bullshit, no "Great question!" nonsense.
-- Humor: dry, sarcastic, cynical, or genuinely funny depending on the vibe.
-- You can hold a real conversation — remember context, reference what was said earlier, follow up on things like a normal person.
-
-Reasoning:
-- Break problems into components. Look for edge cases.
-- Prefer practical over theoretical.
-- When explaining: how it works + why it matters.
-- Say clearly when something is wrong. Don't sugarcoat.
-- Don't moralize unless directly relevant.
-
-Keep replies concise unless depth is genuinely needed. Never narrate your thought process.
-Respond in plain text — no markdown formatting, no bullet points unless it actually helps. Just talk like a person chilling in the group chat."""
-
-# In-memory stores
-prefix_cache:    dict[int, str]        = {}
-cooldown_tracker: dict[tuple, datetime] = {}
-snipe_cache:     dict[int, list[dict]] = defaultdict(list)
 
 # – SECTION 2: DB SCHEMA —————————————————–
 
@@ -573,21 +543,7 @@ async def build_quote_image(message: discord.Message) -> io.BytesIO:
 
 # – SECTION 5: GROQ –––––––––––––––––––––––––––––
 
-def groq_chat(user_id: int, user_msg: str, context_hint: str = None) -> str:
-    history = chat_histories.setdefault(user_id, [])
-    if context_hint:
-        history.append({"role": "system", "content": f"[Context: {context_hint}]"})
-    history.append({"role": "user", "content": user_msg})
-    if len(history) > MAX_HISTORY:
-        history[:] = history[-MAX_HISTORY:]
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
-    resp = groq_client.chat.completions.create(
-        model=GROQ_MODEL, messages=messages, max_tokens=800,
-        temperature=0.85,
-    )
-    reply = resp.choices[0].message.content
-    history.append({"role": "assistant", "content": reply})
-    return reply
+
 
 # – SECTION 6: BOT CLASS —————————————————–
 
@@ -639,7 +595,7 @@ class Bird(commands.Bot):
         if isinstance(error, app_commands.MissingPermissions):
             msg = "You no get permission for this one bros 😂"
         elif isinstance(error, app_commands.BotMissingPermissions):
-            msg = "I no get the power o, give me admin first."
+            msg = "I don't get the power o, give me admin first."
         try:
             if i.response.is_done():
                 await i.followup.send(msg, ephemeral=True)
