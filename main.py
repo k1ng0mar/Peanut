@@ -1,3 +1,4 @@
+
 # ============================================================================
 # that one bird 🐦 – bot.py (single-file build) – FULLY FIXED & PERSONALIZED
 # ============================================================================
@@ -655,137 +656,545 @@ class Bird(commands.Bot):
 
 bot = Bird()
 
-# – SECTION 7: SETUP UI (dropdowns) —————————————–
+# – SECTION 7: SETUP UI ─────────────────────────────────────
+
+# ── Display helpers ──
+
+async def _ch_display(guild: discord.Guild, key: str) -> str:
+    v = await get_setting(guild.id, key)
+    if not v: return "Not set"
+    c = guild.get_channel(int(v))
+    return c.mention if c else f"ID {v}"
+
+async def _ro_display(guild: discord.Guild, key: str) -> str:
+    v = await get_setting(guild.id, key)
+    if not v: return "Not set"
+    r = guild.get_role(int(v))
+    return r.mention if r else f"ID {v}"
+
+async def _parse_channel(guild: discord.Guild, text: str):
+    """Return channel, None (clear), or 'INVALID'."""
+    t = text.strip()
+    if not t or t.lower() in ('none', 'clear', '-'): return None
+    cid = re.sub(r'[<#>]', '', t)
+    try:
+        ch = guild.get_channel(int(cid))
+        if ch: return ch
+    except ValueError:
+        pass
+    name = t.lstrip('#').lower()
+    for ch in guild.text_channels:
+        if ch.name.lower() == name: return ch
+    return 'INVALID'
+
+async def _parse_role(guild: discord.Guild, text: str):
+    """Return role, None (clear), or 'INVALID'."""
+    t = text.strip()
+    if not t or t.lower() in ('none', 'clear', '-'): return None
+    rid = re.sub(r'[<@&>]', '', t)
+    try:
+        r = guild.get_role(int(rid))
+        if r: return r
+    except ValueError:
+        pass
+    name = t.lower()
+    for r in guild.roles:
+        if r.name.lower() == name: return r
+    return 'INVALID'
+
+# ── Category embed builder ──
+
+async def _build_cat_embed(guild: discord.Guild, cat: str) -> discord.Embed:
+    if cat == 'general':
+        prefix = await get_setting(guild.id, 'prefix') or '>'
+        e = discord.Embed(title="⚙️ General", color=0x5865F2)
+        e.add_field(name="Prefix",  value=f"`{prefix}`")
+        e.add_field(name="Members", value=str(guild.member_count))
+        e.set_footer(text="Click ✏️ Configure to change")
+
+    elif cat == 'logs':
+        e = discord.Embed(title="📋 Log Channels", color=0x5865F2)
+        e.add_field(name="Mod logs",     value=await _ch_display(guild, 'log_mod_id'))
+        e.add_field(name="Message logs", value=await _ch_display(guild, 'log_message_id'))
+        e.add_field(name="Member logs",  value=await _ch_display(guild, 'log_member_id'))
+        e.add_field(name="Server logs",  value=await _ch_display(guild, 'log_server_id'))
+        e.set_footer(text="Use channel ID, #name, or 'none' to clear")
+
+    elif cat == 'welcome':
+        msg = await get_setting(guild.id, 'welcome_message') or 'Not set'
+        e = discord.Embed(title="👋 Welcome", color=0x57F287)
+        e.add_field(name="Channel", value=await _ch_display(guild, 'welcome_channel_id'))
+        e.add_field(name="Message", value=msg[:300], inline=False)
+        e.set_footer(text="Variables: {user} {name} {server} {count}")
+
+    elif cat == 'roles':
+        e = discord.Embed(title="🎭 Roles", color=0x5865F2)
+        e.add_field(name="Autorole",      value=await _ro_display(guild, 'autorole_id'))
+        e.add_field(name="Jail role",     value=await _ro_display(guild, 'jail_role_id'))
+        e.add_field(name="Deadchat ping", value=await _ro_display(guild, 'deadchat_role_id'))
+        e.add_field(name="Deadchat perm", value=await _ro_display(guild, 'deadchat_perm_role'))
+        e.set_footer(text="Use role ID, @mention, name, or 'none' to clear")
+
+    elif cat == 'starboard':
+        emoji  = await get_setting(guild.id, 'starboard_emoji') or '⭐'
+        thresh = await get_setting(guild.id, 'starboard_threshold') or 3
+        e = discord.Embed(title="⭐ Starboard", color=0xFFD700)
+        e.add_field(name="Channel",   value=await _ch_display(guild, 'starboard_channel_id'))
+        e.add_field(name="Emoji",     value=emoji)
+        e.add_field(name="Threshold", value=str(thresh))
+        e.set_footer(text="Click ✏️ Configure to change")
+
+    elif cat == 'jail':
+        e = discord.Embed(title="🔒 Jail", color=0xFF6600)
+        e.add_field(name="Channel", value=await _ch_display(guild, 'jail_channel_id'))
+        e.add_field(name="Role",    value=await _ro_display(guild, 'jail_role_id'))
+        e.set_footer(text="Click ✏️ Configure to change")
+
+    elif cat == 'automod':
+        enabled    = await get_setting(guild.id, 'automod_enabled')
+        action     = await get_setting(guild.id, 'automod_action') or 'delete_only'
+        mute_m     = await get_setting(guild.id, 'automod_mute_minutes') or 10
+        expiry     = await get_setting(guild.id, 'automod_warn_expiry') or 'never'
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute("SELECT COUNT(*) FROM automod_words WHERE guild_id=?",
+                                  (guild.id,)) as cur:
+                word_count = (await cur.fetchone())[0]
+        e = discord.Embed(title="🛡️ Automod", color=0xFF8800)
+        e.add_field(name="Status",         value="✅ Enabled" if enabled else "❌ Disabled")
+        e.add_field(name="Action",         value=action)
+        e.add_field(name="Mute duration",  value=f"{mute_m}min")
+        e.add_field(name="Warn expiry",    value=str(expiry))
+        e.add_field(name="Filtered words", value=str(word_count))
+        e.set_footer(text="Actions: delete_only · warn · mute")
+
+    elif cat == 'antiraid':
+        enabled   = await get_setting(guild.id, 'antiraid_enabled')
+        threshold = await get_setting(guild.id, 'antiraid_threshold') or 10
+        seconds   = await get_setting(guild.id, 'antiraid_seconds') or 10
+        action    = await get_setting(guild.id, 'antiraid_action') or 'slowmode'
+        e = discord.Embed(title="🚨 Anti-Raid", color=0xFF0000)
+        e.add_field(name="Status",  value="✅ Enabled" if enabled else "❌ Disabled")
+        e.add_field(name="Trigger", value=f"{threshold} joins in {seconds}s")
+        e.add_field(name="Action",  value=action)
+        e.set_footer(text="Actions: slowmode · lockdown · kick_new")
+
+    elif cat == 'warns':
+        kick_t = await get_setting(guild.id, 'warn_kick_threshold') or 0
+        ban_t  = await get_setting(guild.id, 'warn_ban_threshold') or 0
+        mute_t = await get_setting(guild.id, 'warn_mute_threshold') or 0
+        mute_m = await get_setting(guild.id, 'warn_mute_minutes') or 10
+        e = discord.Embed(title="⚠️ Warn Auto-Actions", color=0xFFAA00)
+        e.add_field(name="Auto-kick", value=f"At {kick_t} warns" if int(kick_t) else "Off")
+        e.add_field(name="Auto-ban",  value=f"At {ban_t} warns"  if int(ban_t)  else "Off")
+        e.add_field(name="Auto-mute", value=f"At {mute_t} warns → {mute_m}min" if int(mute_t) else "Off")
+        e.set_footer(text="Set to 0 to disable. Mute duration applies when mute threshold is hit.")
+
+    elif cat == 'bloodtrials':
+        e = discord.Embed(title="📖 Blood Trials", color=0xB22222)
+        e.add_field(name="Chapter channel",   value=await _ch_display(guild, 'chapter_channel_id'))
+        e.add_field(name="Chapter ping role", value=await _ro_display(guild, 'chapter_role_id'))
+        e.add_field(name="Character channel", value=await _ch_display(guild, 'character_channel_id'))
+        e.set_footer(text="Click ✏️ Configure to change")
+
+    else:
+        e = discord.Embed(title="Unknown category", color=0xFF0000)
+
+    return e
+
+# ── Modal defaults fetcher ──
+
+async def _modal_defaults(guild: discord.Guild, cat: str) -> dict:
+    d = {}
+    if cat == 'general':
+        d['prefix'] = await get_setting(guild.id, 'prefix') or '>'
+    elif cat == 'logs':
+        for k, key in [('mod','log_mod_id'),('msg','log_message_id'),
+                       ('mem','log_member_id'),('srv','log_server_id')]:
+            v = await get_setting(guild.id, key)
+            d[k] = str(v) if v else ''
+    elif cat == 'welcome':
+        v = await get_setting(guild.id, 'welcome_channel_id')
+        d['ch']  = str(v) if v else ''
+        d['msg'] = await get_setting(guild.id, 'welcome_message') or ''
+    elif cat == 'roles':
+        for k, key in [('autorole','autorole_id'),('jail','jail_role_id'),
+                       ('dc_ping','deadchat_role_id'),('dc_perm','deadchat_perm_role')]:
+            v = await get_setting(guild.id, key)
+            d[k] = str(v) if v else ''
+    elif cat == 'starboard':
+        v = await get_setting(guild.id, 'starboard_channel_id')
+        d['ch']     = str(v) if v else ''
+        d['emoji']  = await get_setting(guild.id, 'starboard_emoji') or '⭐'
+        d['thresh'] = str(await get_setting(guild.id, 'starboard_threshold') or 3)
+    elif cat == 'jail':
+        v = await get_setting(guild.id, 'jail_channel_id')
+        d['ch']   = str(v) if v else ''
+        v = await get_setting(guild.id, 'jail_role_id')
+        d['role'] = str(v) if v else ''
+    elif cat == 'automod':
+        d['action'] = await get_setting(guild.id, 'automod_action') or 'delete_only'
+        d['mute_m'] = str(safe_int(await get_setting(guild.id, 'automod_mute_minutes')) or 10)
+        d['expiry'] = await get_setting(guild.id, 'automod_warn_expiry') or 'never'
+    elif cat == 'antiraid':
+        d['thresh']  = str(safe_int(await get_setting(guild.id, 'antiraid_threshold')) or 10)
+        d['seconds'] = str(safe_int(await get_setting(guild.id, 'antiraid_seconds')) or 10)
+        d['action']  = await get_setting(guild.id, 'antiraid_action') or 'slowmode'
+    elif cat == 'warns':
+        d['kick']   = str(safe_int(await get_setting(guild.id, 'warn_kick_threshold')) or 0)
+        d['ban']    = str(safe_int(await get_setting(guild.id, 'warn_ban_threshold')) or 0)
+        d['mute']   = str(safe_int(await get_setting(guild.id, 'warn_mute_threshold')) or 0)
+        d['mute_m'] = str(safe_int(await get_setting(guild.id, 'warn_mute_minutes')) or 10)
+    elif cat == 'bloodtrials':
+        for k, key in [('ch_ch','chapter_channel_id'),('char_ch','character_channel_id')]:
+            v = await get_setting(guild.id, key)
+            d[k] = str(v) if v else ''
+        v = await get_setting(guild.id, 'chapter_role_id')
+        d['ch_role'] = str(v) if v else ''
+    return d
+
+# ── Modal base ──
+
+class _SetupModal(discord.ui.Modal):
+    def __init__(self, guild: discord.Guild, followup: discord.Webhook,
+                 message_id: int, cat: str):
+        super().__init__()
+        self.setup_guild = guild
+        self.followup    = followup
+        self.message_id  = message_id
+        self.cat         = cat
+
+    async def _save_and_refresh(self, i: discord.Interaction):
+        new_embed = await _build_cat_embed(self.setup_guild, self.cat)
+        view = CategoryView(self.cat, self.setup_guild)
+        try:
+            await self.followup.edit_message(self.message_id, embed=new_embed, view=view)
+        except Exception:
+            pass
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+# ── Modals ──
+
+class GeneralModal(_SetupModal, title="⚙️ General Settings"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'general')
+        d = defaults or {}
+        self.prefix_inp = discord.ui.TextInput(
+            label="Command Prefix", placeholder="e.g.  >  !  ?",
+            default=d.get('prefix', '>'), max_length=5, required=True)
+        self.add_item(self.prefix_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        p = str(self.prefix_inp).strip() or '>'
+        await set_setting(self.setup_guild.id, 'prefix', p)
+        prefix_cache[self.setup_guild.id] = p
+        await self._save_and_refresh(i)
+
+class LogsModal(_SetupModal, title="📋 Log Channels"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'logs')
+        d = defaults or {}
+        ph = "Channel ID, #name, or 'none' to clear"
+        self.mod_inp = discord.ui.TextInput(label="Mod Log",     placeholder=ph, default=d.get('mod',''), required=False)
+        self.msg_inp = discord.ui.TextInput(label="Message Log", placeholder=ph, default=d.get('msg',''), required=False)
+        self.mem_inp = discord.ui.TextInput(label="Member Log",  placeholder=ph, default=d.get('mem',''), required=False)
+        self.srv_inp = discord.ui.TextInput(label="Server Log",  placeholder=ph, default=d.get('srv',''), required=False)
+        for inp in [self.mod_inp, self.msg_inp, self.mem_inp, self.srv_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        pairs = [(self.mod_inp,'log_mod_id'),(self.msg_inp,'log_message_id'),
+                 (self.mem_inp,'log_member_id'),(self.srv_inp,'log_server_id')]
+        errors = []
+        for inp, key in pairs:
+            t = str(inp).strip()
+            if not t: continue
+            ch = await _parse_channel(self.setup_guild, t)
+            if ch == 'INVALID': errors.append(f"`{t}`")
+            elif ch is None: await set_setting(self.setup_guild.id, key, None)
+            else: await set_setting(self.setup_guild.id, key, ch.id)
+        if errors:
+            try: await i.response.send_message(f"⚠️ Not found: {', '.join(errors)}", ephemeral=True)
+            except Exception: pass
+        await self._save_and_refresh(i)
+
+class WelcomeModal(_SetupModal, title="👋 Welcome"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'welcome')
+        d = defaults or {}
+        self.ch_inp  = discord.ui.TextInput(label="Welcome Channel", placeholder="Channel ID or #name", default=d.get('ch',''), required=False)
+        self.msg_inp = discord.ui.TextInput(label="Welcome Message", placeholder="{user} just joined {server}!",
+                                            default=d.get('msg',''), required=False,
+                                            style=discord.TextStyle.paragraph, max_length=500)
+        self.add_item(self.ch_inp); self.add_item(self.msg_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        t = str(self.ch_inp).strip()
+        if t:
+            ch = await _parse_channel(self.setup_guild, t)
+            if ch == 'INVALID':
+                try: await i.response.send_message(f"⚠️ Channel `{t}` not found.", ephemeral=True)
+                except Exception: pass
+            elif ch is None: await set_setting(self.setup_guild.id, 'welcome_channel_id', None)
+            else: await set_setting(self.setup_guild.id, 'welcome_channel_id', ch.id)
+        msg = str(self.msg_inp).strip()
+        if msg: await set_setting(self.setup_guild.id, 'welcome_message', msg)
+        await self._save_and_refresh(i)
+
+class RolesModal(_SetupModal, title="🎭 Roles"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'roles')
+        d = defaults or {}
+        ph = "Role ID, @mention, name, or 'none'"
+        self.ar_inp  = discord.ui.TextInput(label="Autorole (new members)",  placeholder=ph, default=d.get('autorole',''), required=False)
+        self.jr_inp  = discord.ui.TextInput(label="Jail Role",               placeholder=ph, default=d.get('jail',''),     required=False)
+        self.dc_inp  = discord.ui.TextInput(label="Deadchat Ping Role",      placeholder=ph, default=d.get('dc_ping',''),  required=False)
+        self.dcp_inp = discord.ui.TextInput(label="Deadchat Permission Role",placeholder=ph, default=d.get('dc_perm',''),  required=False)
+        for inp in [self.ar_inp, self.jr_inp, self.dc_inp, self.dcp_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        pairs = [(self.ar_inp,'autorole_id'),(self.jr_inp,'jail_role_id'),
+                 (self.dc_inp,'deadchat_role_id'),(self.dcp_inp,'deadchat_perm_role')]
+        errors = []
+        for inp, key in pairs:
+            t = str(inp).strip()
+            if not t: continue
+            r = await _parse_role(self.setup_guild, t)
+            if r == 'INVALID': errors.append(f"`{t}`")
+            elif r is None: await set_setting(self.setup_guild.id, key, None)
+            else: await set_setting(self.setup_guild.id, key, r.id)
+        if errors:
+            try: await i.response.send_message(f"⚠️ Not found: {', '.join(errors)}", ephemeral=True)
+            except Exception: pass
+        await self._save_and_refresh(i)
+
+class StarboardModal(_SetupModal, title="⭐ Starboard"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'starboard')
+        d = defaults or {}
+        self.ch_inp = discord.ui.TextInput(label="Starboard Channel",  placeholder="Channel ID or #name", default=d.get('ch',''),     required=False)
+        self.em_inp = discord.ui.TextInput(label="Reaction Emoji",     placeholder="⭐",                   default=d.get('emoji','⭐'), required=False, max_length=10)
+        self.th_inp = discord.ui.TextInput(label="Reaction Threshold", placeholder="3",                    default=d.get('thresh','3'),required=False, max_length=3)
+        for inp in [self.ch_inp, self.em_inp, self.th_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        t = str(self.ch_inp).strip()
+        if t:
+            ch = await _parse_channel(self.setup_guild, t)
+            if ch and ch != 'INVALID': await set_setting(self.setup_guild.id, 'starboard_channel_id', ch.id)
+        emoji = str(self.em_inp).strip()
+        if emoji: await set_setting(self.setup_guild.id, 'starboard_emoji', emoji)
+        thresh = str(self.th_inp).strip()
+        if thresh:
+            try: await set_setting(self.setup_guild.id, 'starboard_threshold', max(1, int(thresh)))
+            except ValueError: pass
+        await self._save_and_refresh(i)
+
+class JailModal(_SetupModal, title="🔒 Jail"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'jail')
+        d = defaults or {}
+        self.ch_inp   = discord.ui.TextInput(label="Jail Channel", placeholder="Channel ID or #name",     default=d.get('ch',''),   required=False)
+        self.role_inp = discord.ui.TextInput(label="Jail Role",    placeholder="Role ID, @mention, name", default=d.get('role',''), required=False)
+        self.add_item(self.ch_inp); self.add_item(self.role_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        t = str(self.ch_inp).strip()
+        if t:
+            ch = await _parse_channel(self.setup_guild, t)
+            if ch and ch != 'INVALID': await set_setting(self.setup_guild.id, 'jail_channel_id', ch.id)
+        t = str(self.role_inp).strip()
+        if t:
+            r = await _parse_role(self.setup_guild, t)
+            if r and r != 'INVALID': await set_setting(self.setup_guild.id, 'jail_role_id', r.id)
+        await self._save_and_refresh(i)
+
+class AutomodModal(_SetupModal, title="🛡️ Automod Settings"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'automod')
+        d = defaults or {}
+        self.act_inp  = discord.ui.TextInput(label="Action (delete_only / warn / mute)", placeholder="delete_only", default=d.get('action','delete_only'), required=False, max_length=15)
+        self.mut_inp  = discord.ui.TextInput(label="Mute Duration (minutes)",            placeholder="10",          default=d.get('mute_m','10'),          required=False, max_length=5)
+        self.exp_inp  = discord.ui.TextInput(label="Warn Expiry (e.g. 7d, 30d, never)", placeholder="never",       default=d.get('expiry','never'),        required=False, max_length=10)
+        for inp in [self.act_inp, self.mut_inp, self.exp_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        action = str(self.act_inp).strip().lower()
+        if action in ('delete_only','warn','mute'):
+            await set_setting(self.setup_guild.id, 'automod_action', action)
+        mute = str(self.mut_inp).strip()
+        if mute:
+            try: await set_setting(self.setup_guild.id, 'automod_mute_minutes', max(1, int(mute)))
+            except ValueError: pass
+        expiry = str(self.exp_inp).strip()
+        if expiry:
+            await set_setting(self.setup_guild.id, 'automod_warn_expiry', None if expiry == 'never' else expiry)
+        await self._save_and_refresh(i)
+
+class AntiraidModal(_SetupModal, title="🚨 Anti-Raid Settings"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'antiraid')
+        d = defaults or {}
+        self.thr_inp = discord.ui.TextInput(label="Join Count to Trigger",                    placeholder="10",       default=d.get('thresh','10'),   required=False, max_length=4)
+        self.sec_inp = discord.ui.TextInput(label="Time Window (seconds)",                    placeholder="10",       default=d.get('seconds','10'),  required=False, max_length=4)
+        self.act_inp = discord.ui.TextInput(label="Action (slowmode / lockdown / kick_new)", placeholder="slowmode", default=d.get('action','slowmode'), required=False, max_length=15)
+        for inp in [self.thr_inp, self.sec_inp, self.act_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        t = str(self.thr_inp).strip()
+        if t:
+            try: await set_setting(self.setup_guild.id, 'antiraid_threshold', max(1, int(t)))
+            except ValueError: pass
+        s = str(self.sec_inp).strip()
+        if s:
+            try: await set_setting(self.setup_guild.id, 'antiraid_seconds', max(1, int(s)))
+            except ValueError: pass
+        action = str(self.act_inp).strip().lower()
+        if action in ('slowmode','lockdown','kick_new'):
+            await set_setting(self.setup_guild.id, 'antiraid_action', action)
+        await self._save_and_refresh(i)
+
+class WarnsModal(_SetupModal, title="⚠️ Warn Auto-Actions"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'warns')
+        d = defaults or {}
+        self.kk_inp = discord.ui.TextInput(label="Auto-kick at X warns (0 = off)", placeholder="3",  default=d.get('kick','0'),   required=False, max_length=3)
+        self.bn_inp = discord.ui.TextInput(label="Auto-ban at X warns (0 = off)",  placeholder="0",  default=d.get('ban','0'),    required=False, max_length=3)
+        self.mt_inp = discord.ui.TextInput(label="Auto-mute at X warns (0 = off)", placeholder="0",  default=d.get('mute','0'),   required=False, max_length=3)
+        self.mm_inp = discord.ui.TextInput(label="Mute Duration (minutes)",        placeholder="10", default=d.get('mute_m','10'),required=False, max_length=5)
+        for inp in [self.kk_inp, self.bn_inp, self.mt_inp, self.mm_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        for inp, key in [(self.kk_inp,'warn_kick_threshold'),(self.bn_inp,'warn_ban_threshold'),
+                         (self.mt_inp,'warn_mute_threshold')]:
+            t = str(inp).strip()
+            if t:
+                try: await set_setting(self.setup_guild.id, key, max(0, int(t)))
+                except ValueError: pass
+        m = str(self.mm_inp).strip()
+        if m:
+            try: await set_setting(self.setup_guild.id, 'warn_mute_minutes', max(1, int(m)))
+            except ValueError: pass
+        await self._save_and_refresh(i)
+
+class BloodTrialsModal(_SetupModal, title="📖 Blood Trials"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'bloodtrials')
+        d = defaults or {}
+        self.cch_inp  = discord.ui.TextInput(label="Chapter Channel",   placeholder="Channel ID or #name",     default=d.get('ch_ch',''),   required=False)
+        self.cr_inp   = discord.ui.TextInput(label="Chapter Ping Role", placeholder="Role ID, @mention, name", default=d.get('ch_role',''), required=False)
+        self.char_inp = discord.ui.TextInput(label="Character Channel", placeholder="Channel ID or #name",     default=d.get('char_ch',''), required=False)
+        for inp in [self.cch_inp, self.cr_inp, self.char_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        t = str(self.cch_inp).strip()
+        if t:
+            ch = await _parse_channel(self.setup_guild, t)
+            if ch and ch != 'INVALID': await set_setting(self.setup_guild.id, 'chapter_channel_id', ch.id)
+        t = str(self.cr_inp).strip()
+        if t:
+            r = await _parse_role(self.setup_guild, t)
+            if r and r != 'INVALID': await set_setting(self.setup_guild.id, 'chapter_role_id', r.id)
+        t = str(self.char_inp).strip()
+        if t:
+            ch = await _parse_channel(self.setup_guild, t)
+            if ch and ch != 'INVALID': await set_setting(self.setup_guild.id, 'character_channel_id', ch.id)
+        await self._save_and_refresh(i)
+
+_MODAL_MAP = {
+    'general': GeneralModal, 'logs': LogsModal, 'welcome': WelcomeModal,
+    'roles': RolesModal, 'starboard': StarboardModal, 'jail': JailModal,
+    'automod': AutomodModal, 'antiraid': AntiraidModal,
+    'warns': WarnsModal, 'bloodtrials': BloodTrialsModal,
+}
+
+# ── Buttons ──
+
+class _ConfigureBtn(discord.ui.Button):
+    def __init__(self, cat: str, guild: discord.Guild):
+        super().__init__(label="✏️ Configure", style=discord.ButtonStyle.primary, row=1)
+        self.cat        = cat
+        self.setup_guild = guild
+
+    async def callback(self, i: discord.Interaction):
+        defaults  = await _modal_defaults(i.guild, self.cat)
+        modal_cls = _MODAL_MAP.get(self.cat)
+        if not modal_cls:
+            await i.response.send_message("No modal for this category.", ephemeral=True)
+            return
+        modal = modal_cls(guild=i.guild, followup=i.followup,
+                          message_id=i.message.id, defaults=defaults)
+        await i.response.send_modal(modal)
+
+class _ToggleBtn(discord.ui.Button):
+    def __init__(self, cat: str, guild: discord.Guild):
+        super().__init__(label="⚡ Toggle On/Off", style=discord.ButtonStyle.danger, row=1)
+        self.cat        = cat
+        self.setup_guild = guild
+
+    async def callback(self, i: discord.Interaction):
+        key = 'automod_enabled' if self.cat == 'automod' else 'antiraid_enabled'
+        cur = safe_int(await get_setting(i.guild.id, key) or 0) or 0
+        new = 1 - cur
+        await set_setting(i.guild.id, key, new)
+        embed = await _build_cat_embed(i.guild, self.cat)
+        await i.response.edit_message(embed=embed, view=CategoryView(self.cat, i.guild))
+
+class _BackBtn(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="↩ Back", style=discord.ButtonStyle.secondary, row=1)
+
+    async def callback(self, i: discord.Interaction):
+        e = discord.Embed(
+            title=f"⚙️ Setup – {i.guild.name}",
+            description="Select a category to view and configure.",
+            color=0x5865F2)
+        if i.guild.icon:
+            e.set_thumbnail(url=i.guild.icon.url)
+        await i.response.edit_message(embed=e, view=SetupView())
+
+# ── Views ──
+
+class CategoryView(discord.ui.View):
+    def __init__(self, cat: str, guild: discord.Guild):
+        super().__init__(timeout=300)
+        self.add_item(_ConfigureBtn(cat, guild))
+        if cat in ('automod', 'antiraid'):
+            self.add_item(_ToggleBtn(cat, guild))
+        self.add_item(_BackBtn())
 
 class SetupCategorySelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="📋 Log Channels",   value="logs",       description="Set mod/message/member/server log channels"),
-            discord.SelectOption(label="👋 Welcome",         value="welcome",    description="Welcome channel & message"),
-            discord.SelectOption(label="🎭 Roles",           value="roles",      description="Autorole, jail role, deadchat roles"),
-            discord.SelectOption(label="⭐ Starboard",       value="starboard",  description="Starboard channel, emoji, threshold"),
-            discord.SelectOption(label="🔒 Jail",            value="jail",       description="Jail channel and role"),
-            discord.SelectOption(label="🛡️ Automod",        value="automod",    description="Word filter settings"),
-            discord.SelectOption(label="🚨 Anti-Raid",       value="antiraid",   description="Anti-raid settings and toggle"),
-            discord.SelectOption(label="⚠️ Warn Thresholds", value="warns",      description="Auto-kick/ban/mute at warn counts"),
-            discord.SelectOption(label="📖 Blood Trials",    value="bloodtrials",description="Chapter and character announcement channels"),
-            discord.SelectOption(label="🔧 General",         value="general",    description="Prefix and display overview"),
+            discord.SelectOption(label="⚙️ General",         value="general",     description="Prefix and overview"),
+            discord.SelectOption(label="📋 Log Channels",    value="logs",        description="Mod / message / member / server logs"),
+            discord.SelectOption(label="👋 Welcome",          value="welcome",     description="Welcome channel and message"),
+            discord.SelectOption(label="🎭 Roles",            value="roles",       description="Autorole, jail, deadchat roles"),
+            discord.SelectOption(label="⭐ Starboard",        value="starboard",   description="Starboard channel, emoji, threshold"),
+            discord.SelectOption(label="🔒 Jail",             value="jail",        description="Jail channel and role"),
+            discord.SelectOption(label="🛡️ Automod",         value="automod",     description="Word filter action and settings"),
+            discord.SelectOption(label="🚨 Anti-Raid",        value="antiraid",    description="Anti-raid toggle and settings"),
+            discord.SelectOption(label="⚠️ Warn Thresholds", value="warns",       description="Auto-kick / ban / mute on warn count"),
+            discord.SelectOption(label="📖 Blood Trials",    value="bloodtrials", description="Chapter and character channels"),
         ]
-        super().__init__(placeholder="Choose a category to configure…", options=options)
+        super().__init__(placeholder="Choose a category…", options=options, row=0)
 
     async def callback(self, i: discord.Interaction):
-        cat = self.values[0]
-        guild = i.guild
-
-        async def ch(key):
-            v = await get_setting(guild.id, key)
-            if not v: return "Not set"
-            c = i.client.get_channel(v)
-            return c.mention if c else f"ID {v}"
-
-        async def ro(key):
-            v = await get_setting(guild.id, key)
-            if not v: return "Not set"
-            r = guild.get_role(int(v))
-            return r.mention if r else f"ID {v}"
-
-        if cat == "logs":
-            e = discord.Embed(title="📋 Log Channels", color=0x5865F2)
-            e.add_field(name="Mod logs",     value=await ch('log_mod_id'))
-            e.add_field(name="Message logs", value=await ch('log_message_id'))
-            e.add_field(name="Member logs",  value=await ch('log_member_id'))
-            e.add_field(name="Server logs",  value=await ch('log_server_id'))
-            e.set_footer(text="Use /setlogchannel to change")
-
-        elif cat == "welcome":
-            msg = await get_setting(guild.id, 'welcome_message') or "Not set"
-            e = discord.Embed(title="👋 Welcome", color=0x57F287)
-            e.add_field(name="Channel", value=await ch('welcome_channel_id'))
-            e.add_field(name="Message", value=msg[:200], inline=False)
-            e.set_footer(text="Use /setwelcome to change | vars: {user} {name} {server} {count}")
-
-        elif cat == "roles":
-            e = discord.Embed(title="🎭 Roles", color=0x5865F2)
-            e.add_field(name="Autorole",       value=await ro('autorole_id'))
-            e.add_field(name="Jail role",      value=await ro('jail_role_id'))
-            e.add_field(name="Deadchat ping",  value=await ro('deadchat_role_id'))
-            e.add_field(name="Deadchat perm",  value=await ro('deadchat_perm_role'))
-            e.set_footer(text="Use /setautorole /setjail /setdeadchatrole to change")
-
-        elif cat == "starboard":
-            emoji = await get_setting(guild.id, 'starboard_emoji') or "⭐"
-            thresh = await get_setting(guild.id, 'starboard_threshold') or 3
-            e = discord.Embed(title="⭐ Starboard", color=0xFFD700)
-            e.add_field(name="Channel",   value=await ch('starboard_channel_id'))
-            e.add_field(name="Emoji",     value=emoji)
-            e.add_field(name="Threshold", value=str(thresh))
-            e.set_footer(text="Use /setstarboard to change")
-
-        elif cat == "jail":
-            e = discord.Embed(title="🔒 Jail", color=0xFF6600)
-            e.add_field(name="Channel", value=await ch('jail_channel_id'))
-            e.add_field(name="Role",    value=await ro('jail_role_id'))
-            e.set_footer(text="Use /setjail to change")
-
-        elif cat == "automod":
-            enabled = await get_setting(guild.id, 'automod_enabled')
-            action  = await get_setting(guild.id, 'automod_action') or "delete_only"
-            mute_m  = await get_setting(guild.id, 'automod_mute_minutes') or 10
-            expiry  = await get_setting(guild.id, 'automod_warn_expiry') or "never"
-            async with aiosqlite.connect(DB) as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM automod_words WHERE guild_id=?", (guild.id,)
-                ) as cur:
-                    word_count = (await cur.fetchone())[0]
-            e = discord.Embed(title="🛡️ Automod", color=0xFF8800)
-            e.add_field(name="Enabled",       value="✅" if enabled else "❌")
-            e.add_field(name="Action",        value=action)
-            e.add_field(name="Mute duration", value=f"{mute_m}min")
-            e.add_field(name="Warn expiry",   value=str(expiry))
-            e.add_field(name="Filtered words",value=str(word_count))
-            e.set_footer(text="Use /automod commands to change")
-
-        elif cat == "antiraid":
-            enabled   = await get_setting(guild.id, 'antiraid_enabled')
-            threshold = await get_setting(guild.id, 'antiraid_threshold') or 10
-            seconds   = await get_setting(guild.id, 'antiraid_seconds')   or 10
-            action    = await get_setting(guild.id, 'antiraid_action')    or "slowmode"
-            e = discord.Embed(title="🚨 Anti-Raid", color=0xFF0000)
-            e.add_field(name="Enabled",   value="✅" if enabled else "❌")
-            e.add_field(name="Trigger",   value=f"{threshold} joins in {seconds}s")
-            e.add_field(name="Action",    value=action)
-            e.set_footer(text="Use /antiraidsettings and /antiraidtoggle to change")
-
-        elif cat == "warns":
-            kick_t = await get_setting(guild.id, 'warn_kick_threshold') or 3
-            ban_t  = await get_setting(guild.id, 'warn_ban_threshold')  or 0
-            mute_t = await get_setting(guild.id, 'warn_mute_threshold') or 0
-            mute_m = await get_setting(guild.id, 'warn_mute_minutes')   or 10
-            e = discord.Embed(title="⚠️ Warn Thresholds", color=0xFFAA00)
-            e.add_field(name="Auto-kick", value=str(kick_t) if kick_t else "Off")
-            e.add_field(name="Auto-ban",  value=str(ban_t)  if ban_t  else "Off")
-            e.add_field(name="Auto-mute", value=f"{mute_t} warns → {mute_m}min" if mute_t else "Off")
-            e.set_footer(text="Use /setwarnthreshold to change")
-
-        elif cat == "bloodtrials":
-            e = discord.Embed(title="📖 Blood Trials", color=0xB22222)
-            e.add_field(name="Chapters channel",  value=await ch('chapter_channel_id'))
-            e.add_field(name="Chapter ping role", value=await ro('chapter_role_id'))
-            e.add_field(name="Characters channel",value=await ch('character_channel_id'))
-            e.set_footer(text="Use /setchapterchannel and /setcharacterchannel to change")
-
-        else:  # general
-            prefix = await get_setting(guild.id, 'prefix') or "?"
-            e = discord.Embed(title="🔧 General", color=0x5865F2)
-            e.add_field(name="Prefix", value=f"`{prefix}`")
-            e.add_field(name="Members", value=str(guild.member_count))
-            e.set_footer(text="Use /setprefix to change prefix")
-
-        await i.response.send_message(embed=e, ephemeral=True)
+        cat   = self.values[0]
+        embed = await _build_cat_embed(i.guild, cat)
+        await i.response.edit_message(embed=embed, view=CategoryView(cat, i.guild))
 
 class SetupView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=120)
+        super().__init__(timeout=300)
         self.add_item(SetupCategorySelect())
 
 # – SECTION 8: SETTINGS COMMANDS ———————————————
@@ -795,103 +1204,11 @@ class SetupView(discord.ui.View):
 async def cmd_setup(i: discord.Interaction):
     e = discord.Embed(
         title=f"⚙️ Setup – {i.guild.name}",
-        description="Select a category below to view and configure settings.",
+        description="Select a category below to view and configure settings.\nAll changes are saved immediately.",
         color=0x5865F2)
     if i.guild.icon:
         e.set_thumbnail(url=i.guild.icon.url)
     await i.response.send_message(embed=e, view=SetupView(), ephemeral=True)
-
-@bot.tree.command(name="setprefix", description="Change the command prefix")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setprefix(i: discord.Interaction, prefix: str):
-    await set_setting(i.guild.id, 'prefix', prefix)
-    prefix_cache[i.guild.id] = prefix
-    await i.response.send_message(f"✅ Prefix → `{prefix}`", ephemeral=True)
-
-@bot.tree.command(name="setlogchannel", description="Set a log channel")
-@app_commands.default_permissions(administrator=True)
-@app_commands.choices(category=[
-    app_commands.Choice(name="mod",      value="log_mod_id"),
-    app_commands.Choice(name="messages", value="log_message_id"),
-    app_commands.Choice(name="members",  value="log_member_id"),
-    app_commands.Choice(name="server",   value="log_server_id"),
-])
-async def cmd_setlogchannel(i: discord.Interaction, category: str,
-                            channel: discord.TextChannel):
-    await set_setting(i.guild.id, category, channel.id)
-    await i.response.send_message(
-        f"✅ **{category.replace('log_','').replace('_id','')}** logs → {channel.mention}",
-        ephemeral=True)
-
-@bot.tree.command(name="setwelcome", description="Set welcome channel and message")
-@app_commands.default_permissions(administrator=True)
-@app_commands.describe(message="Variables: {user} {name} {server} {count}")
-async def cmd_setwelcome(i: discord.Interaction, channel: discord.TextChannel, message: str):
-    await set_setting(i.guild.id, 'welcome_channel_id', channel.id)
-    await set_setting(i.guild.id, 'welcome_message', message)
-    preview = (message
-               .replace("{user}",   i.user.mention)
-               .replace("{name}",   i.user.display_name)
-               .replace("{server}", i.guild.name)
-               .replace("{count}",  str(i.guild.member_count)))
-    e = discord.Embed(title="✅ Welcome set – Preview:", description=preview, color=0x57F287)
-    await i.response.send_message(embed=e, ephemeral=True)
-
-@bot.tree.command(name="setautorole", description="Auto-assign role to new members")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setautorole(i: discord.Interaction, role: discord.Role):
-    await set_setting(i.guild.id, 'autorole_id', role.id)
-    await i.response.send_message(f"✅ Autorole → {role.mention}", ephemeral=True)
-
-@bot.tree.command(name="setjail", description="Set jail channel and role")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setjail(i: discord.Interaction, channel: discord.TextChannel,
-                      role: discord.Role):
-    await set_setting(i.guild.id, 'jail_channel_id', channel.id)
-    await set_setting(i.guild.id, 'jail_role_id', role.id)
-    await i.response.send_message(
-        f"✅ Jail → {channel.mention} | Role → {role.mention}", ephemeral=True)
-
-@bot.tree.command(name="setdeadchatrole", description="Role pinged by /deadchat")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setdeadchatrole(i: discord.Interaction, role: discord.Role):
-    await set_setting(i.guild.id, 'deadchat_role_id', role.id)
-    await i.response.send_message(f"✅ Deadchat ping → {role.mention}", ephemeral=True)
-
-@bot.tree.command(name="setdeadchatperm", description="Restrict who can use /deadchat")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setdeadchatperm(i: discord.Interaction, role: discord.Role = None):
-    await set_setting(i.guild.id, 'deadchat_perm_role', role.id if role else None)
-    await i.response.send_message(
-        f"✅ Deadchat restricted to {role.mention}." if role
-        else "✅ Deadchat open to everyone.", ephemeral=True)
-
-@bot.tree.command(name="setstarboard", description="Configure the starboard")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setstarboard(i: discord.Interaction, channel: discord.TextChannel,
-                           emoji: str = "⭐", threshold: int = 3):
-    await set_setting(i.guild.id, 'starboard_channel_id', channel.id)
-    await set_setting(i.guild.id, 'starboard_emoji', emoji)
-    await set_setting(i.guild.id, 'starboard_threshold', threshold)
-    await i.response.send_message(
-        f"✅ Starboard → {channel.mention} | {emoji} × {threshold}", ephemeral=True)
-
-@bot.tree.command(name="setchapterchannel", description="Channel for chapter announcements")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setchapterchannel(i: discord.Interaction, channel: discord.TextChannel,
-                                role: discord.Role = None):
-    await set_setting(i.guild.id, 'chapter_channel_id', channel.id)
-    if role:
-        await set_setting(i.guild.id, 'chapter_role_id', role.id)
-    await i.response.send_message(
-        f"✅ Chapters → {channel.mention}" + (f" | Ping: {role.mention}" if role else ""),
-        ephemeral=True)
-
-@bot.tree.command(name="setcharacterchannel", description="Channel for character announcements")
-@app_commands.default_permissions(administrator=True)
-async def cmd_setcharacterchannel(i: discord.Interaction, channel: discord.TextChannel):
-    await set_setting(i.guild.id, 'character_channel_id', channel.id)
-    await i.response.send_message(f"✅ Characters → {channel.mention}", ephemeral=True)
 
 @bot.tree.command(name="setcooldown", description="Override command cooldown in seconds")
 @app_commands.default_permissions(administrator=True)
@@ -962,51 +1279,6 @@ async def cmd_setcommandperms(i: discord.Interaction,
         + (f": {', '.join(status)}" if status else " (open to everyone)"),
         ephemeral=True)
 
-@bot.tree.command(name="antiraidsettings", description="Configure anti-raid")
-@app_commands.default_permissions(administrator=True)
-@app_commands.choices(action=[
-    app_commands.Choice(name="slowmode (60s on all channels)", value="slowmode"),
-    app_commands.Choice(name="lockdown (disable all messaging)", value="lockdown"),
-    app_commands.Choice(name="kick new members", value="kick_new"),
-])
-async def cmd_antiraidsettings(i: discord.Interaction, threshold: int,
-                               seconds: int, action: str):
-    await set_setting(i.guild.id, 'antiraid_threshold', threshold)
-    await set_setting(i.guild.id, 'antiraid_seconds', seconds)
-    await set_setting(i.guild.id, 'antiraid_action', action)
-    await i.response.send_message(
-        f"✅ Anti-raid: **{threshold}** joins in **{seconds}s** → `{action}`",
-        ephemeral=True)
-
-@bot.tree.command(name="antiraidtoggle", description="Enable/disable anti-raid")
-@app_commands.default_permissions(administrator=True)
-async def cmd_antiraidtoggle(i: discord.Interaction):
-    cur = await get_setting(i.guild.id, 'antiraid_enabled') or 0
-    new = 1 - int(cur)
-    await set_setting(i.guild.id, 'antiraid_enabled', new)
-    await i.response.send_message(
-        f"✅ Anti-raid {'**enabled**' if new else '**disabled**'}.", ephemeral=True)
-
-@bot.tree.command(name="setwarnthreshold",
-                  description="Set what happens when a warn count is reached")
-@app_commands.default_permissions(administrator=True)
-@app_commands.choices(action=[
-    app_commands.Choice(name="kick", value="kick"),
-    app_commands.Choice(name="ban",  value="ban"),
-    app_commands.Choice(name="mute", value="mute"),
-])
-@app_commands.describe(action="Action", count="Warn count (0 = disabled)",
-                       mute_minutes="If action is mute: duration in minutes")
-async def cmd_setwarnthreshold(i: discord.Interaction, action: str, count: int,
-                               mute_minutes: int = 10):
-    await set_setting(i.guild.id, f"warn_{action}_threshold", count)
-    if action == "mute":
-        await set_setting(i.guild.id, 'warn_mute_minutes', mute_minutes)
-    await i.response.send_message(
-        f"✅ At **{count}** warns → `{action}`"
-        + (f" for {mute_minutes}min" if action == "mute" else "")
-        + (" (disabled)" if count == 0 else ""),
-        ephemeral=True)
 
 # – SECTION 9: MODERATION ––––––––––––––––––––––––––
 
