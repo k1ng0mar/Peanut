@@ -71,7 +71,8 @@ Respond in plain text — no markdown formatting, no bullet points unless it act
 # In-memory stores
 prefix_cache:    dict[int, str]        = {}
 cooldown_tracker: dict[tuple, datetime] = {}
-snipe_cache:     dict[int, list[dict]] = defaultdict(list)
+snipe_cache:      dict[int, list[dict]] = defaultdict(list)
+edit_snipe_cache: dict[int, list[dict]] = defaultdict(list)
 
 # – SECTION 2: DB SCHEMA —————————————————–
 
@@ -413,7 +414,7 @@ async def get_proof(ctx: commands.Context) -> Optional[tuple]:
         return None
 
 DEFAULT_COOLDOWNS = {
-    "deadchat": 3600, "meme": 10, "roast": 15, "8ball": 5, "poll": 30, "urban": 10,
+    "deadchat": 600, "meme": 10, "roast": 15, "8ball": 5, "poll": 30, "urban": 10, "topic": 30,
 }
 
 async def get_cooldown_secs(guild_id: int, cmd: str) -> int:
@@ -764,7 +765,32 @@ async def _build_cat_embed(guild: discord.Guild, cat: str) -> discord.Embed:
         e.add_field(name="Mute duration",  value=f"{mute_m}min")
         e.add_field(name="Warn expiry",    value=str(expiry))
         e.add_field(name="Filtered words", value=str(word_count))
-        e.set_footer(text="Actions: delete_only · warn · mute")
+        e.set_footer(text="Actions: delete_only · warn · mute  |  Use ✏️ to change settings, 📝 Words to manage filter list")
+
+    elif cat == 'automod_words':
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute("SELECT word FROM automod_words WHERE guild_id=? ORDER BY word",
+                                  (guild.id,)) as cur:
+                words = [r[0] for r in await cur.fetchall()]
+        e = discord.Embed(title="🔤 Automod Word Filter", color=0xFF8800)
+        if words:
+            # Spoiler-tag the words so they're hidden by default
+            chunks, chunk = [], ""
+            for w in words:
+                line = f"||{w}|| "
+                if len(chunk) + len(line) > 900:
+                    chunks.append(chunk)
+                    chunk = line
+                else:
+                    chunk += line
+            if chunk:
+                chunks.append(chunk)
+            for idx, c in enumerate(chunks[:4]):
+                e.add_field(name=f"Words {idx+1}" if idx else f"Words ({len(words)} total)",
+                            value=c, inline=False)
+        else:
+            e.description = "No words in filter yet."
+        e.set_footer(text="✏️ Add — type comma-separated words  |  🗑️ Remove — type comma-separated words to delete")
 
     elif cat == 'antiraid':
         enabled   = await get_setting(guild.id, 'antiraid_enabled')
@@ -794,6 +820,88 @@ async def _build_cat_embed(guild: discord.Guild, cat: str) -> discord.Embed:
         e.add_field(name="Chapter ping role", value=await _ro_display(guild, 'chapter_role_id'))
         e.add_field(name="Character channel", value=await _ch_display(guild, 'character_channel_id'))
         e.set_footer(text="Click ✏️ Configure to change")
+
+    elif cat == 'cooldowns':
+        e = discord.Embed(title="⏱️ Command Cooldowns", color=0x5865F2)
+        e.description = "Current cooldown overrides for this server. Defaults shown if not overridden."
+        cmds = ["deadchat", "meme", "roast", "8ball", "poll", "urban", "topic"]
+        DEFAULT_CD = {"deadchat": 600, "meme": 10, "roast": 15, "8ball": 5, "poll": 30, "urban": 10, "topic": 30}
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute(
+                "SELECT command, seconds FROM cooldowns WHERE guild_id=?", (guild.id,)
+            ) as cur:
+                overrides = {r[0]: r[1] for r in await cur.fetchall()}
+        for cmd in cmds:
+            secs    = overrides.get(cmd, DEFAULT_CD.get(cmd, 30))
+            label   = f"{'*custom* ' if cmd in overrides else ''}{secs}s"
+            minutes = f" ({secs//60}m)" if secs >= 60 else ""
+            e.add_field(name=f"`{cmd}`", value=f"{label}{minutes}", inline=True)
+        e.set_footer(text="Click ✏️ Configure to override. * = custom override set")
+
+    elif cat == 'triggers':
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute(
+                "SELECT id, trigger, response, match_type FROM triggers WHERE guild_id=? ORDER BY id",
+                (guild.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+        e = discord.Embed(title="⚡ Auto-Triggers", color=0xAA55FF)
+        if rows:
+            for tid, trig, resp, mtype in rows[:8]:
+                e.add_field(
+                    name=f"#{tid} `{trig}` [{mtype}]",
+                    value=(resp[:80] + "…") if len(resp) > 80 else resp,
+                    inline=False)
+            if len(rows) > 8:
+                e.set_footer(text=f"Showing 8 of {len(rows)} triggers. Use ✏️ Add to add more, 🗑️ Delete to remove by ID.")
+            else:
+                e.set_footer(text="Use ✏️ Add to add a trigger. 🗑️ Delete to remove one by ID.")
+        else:
+            e.description = "No triggers set yet."
+            e.set_footer(text="Click ✏️ Add to create your first trigger.")
+
+    elif cat == 'customcmds':
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute(
+                "SELECT name, action_type, value FROM custom_commands WHERE guild_id=? ORDER BY name",
+                (guild.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+        e = discord.Embed(title="🔧 Custom Commands", color=0x57F287)
+        if rows:
+            for name, atype, val in rows[:8]:
+                e.add_field(name=f"`>{name}` [{atype}]",
+                            value=(val[:80] + "…") if len(val) > 80 else val, inline=False)
+            if len(rows) > 8:
+                e.set_footer(text=f"Showing 8 of {len(rows)}. Use ✏️ Add or 🗑️ Delete to manage.")
+            else:
+                e.set_footer(text="Use ✏️ Add to create a command, 🗑️ Delete to remove one.")
+        else:
+            e.description = "No custom commands yet."
+            e.set_footer(text="Click ✏️ Add to create your first command.")
+
+    elif cat == 'cmdperms':
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute(
+                "SELECT command, role_id, allow_use, show_in_help, silent FROM command_perms WHERE guild_id=?",
+                (guild.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+        e = discord.Embed(title="🔑 Command Permissions", color=0xFF6600)
+        if rows:
+            for cmd, role_id, allow, show, silent in rows[:8]:
+                role = guild.get_role(int(role_id)) if role_id else None
+                flags = []
+                if role: flags.append(f"requires {role.mention}")
+                if not allow: flags.append("disabled")
+                if not show: flags.append("hidden in /help")
+                if silent: flags.append("silent fail")
+                e.add_field(name=f"`{cmd}`",
+                            value=", ".join(flags) if flags else "open to everyone",
+                            inline=False)
+        else:
+            e.description = "No command permission overrides set."
+        e.set_footer(text="Click ✏️ Configure to set perms for a command.")
 
     else:
         e = discord.Embed(title="Unknown category", color=0xFF0000)
@@ -849,6 +957,16 @@ async def _modal_defaults(guild: discord.Guild, cat: str) -> dict:
             d[k] = str(v) if v else ''
         v = await get_setting(guild.id, 'chapter_role_id')
         d['ch_role'] = str(v) if v else ''
+    elif cat == 'cooldowns':
+        cmds = ["deadchat", "meme", "roast", "8ball", "poll", "urban", "topic"]
+        DEFAULT_CD = {"deadchat": 600, "meme": 10, "roast": 15, "8ball": 5, "poll": 30, "urban": 10, "topic": 30}
+        async with aiosqlite.connect(DB) as db:
+            async with db.execute(
+                "SELECT command, seconds FROM cooldowns WHERE guild_id=?", (guild.id,)
+            ) as cur:
+                overrides = {r[0]: r[1] for r in await cur.fetchall()}
+        for cmd in cmds:
+            d[cmd] = str(overrides.get(cmd, DEFAULT_CD.get(cmd, 30)))
     return d
 
 # ── Modal base ──
@@ -1108,11 +1226,232 @@ class BloodTrialsModal(_SetupModal, title="📖 Blood Trials"):
             if ch and ch != 'INVALID': await set_setting(self.setup_guild.id, 'character_channel_id', ch.id)
         await self._save_and_refresh(i)
 
+class CooldownsModal(_SetupModal, title="⏱️ Command Cooldowns"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'cooldowns')
+        d = defaults or {}
+        self.dc_inp  = discord.ui.TextInput(label="deadchat (seconds)",  default=d.get('deadchat','600'), required=False, max_length=6)
+        self.me_inp  = discord.ui.TextInput(label="meme (seconds)",      default=d.get('meme','10'),       required=False, max_length=6)
+        self.ro_inp  = discord.ui.TextInput(label="roast (seconds)",     default=d.get('roast','15'),      required=False, max_length=6)
+        self.po_inp  = discord.ui.TextInput(label="poll (seconds)",      default=d.get('poll','30'),       required=False, max_length=6)
+        self.ur_inp  = discord.ui.TextInput(label="urban / 8ball / topic (seconds)",
+                                            placeholder="e.g.  10  (applies to urban, 8ball, topic)",
+                                            default=d.get('urban','10'), required=False, max_length=6)
+        for inp in [self.dc_inp, self.me_inp, self.ro_inp, self.po_inp, self.ur_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        mapping = [
+            (self.dc_inp, ['deadchat']),
+            (self.me_inp, ['meme']),
+            (self.ro_inp, ['roast']),
+            (self.po_inp, ['poll']),
+            (self.ur_inp, ['urban', '8ball', 'topic']),
+        ]
+        async with aiosqlite.connect(DB) as db:
+            for inp, cmds in mapping:
+                t = str(inp).strip()
+                if not t: continue
+                try:
+                    secs = max(0, int(t))
+                    for cmd in cmds:
+                        await db.execute(
+                            "INSERT OR REPLACE INTO cooldowns (guild_id,command,seconds) VALUES (?,?,?)",
+                            (self.setup_guild.id, cmd, secs))
+                except ValueError:
+                    pass
+            await db.commit()
+        await self._save_and_refresh(i)
+
+
+class AutomodWordsAddModal(_SetupModal, title="🔤 Add Words to Filter"):
+    def __init__(self, guild, followup, message_id):
+        super().__init__(guild, followup, message_id, 'automod_words')
+        self.words_inp = discord.ui.TextInput(
+            label="Words to add (comma-separated)",
+            placeholder="badword1, badword2, badword3",
+            style=discord.TextStyle.paragraph, required=True, max_length=1000)
+        self.add_item(self.words_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        raw   = str(self.words_inp)
+        words = [w.strip().lower() for w in raw.split(',') if w.strip()]
+        async with aiosqlite.connect(DB) as db:
+            for w in words:
+                await db.execute(
+                    "INSERT OR IGNORE INTO automod_words (guild_id,word) VALUES (?,?)",
+                    (self.setup_guild.id, w))
+            await db.commit()
+        await self._save_and_refresh(i)
+
+
+class AutomodWordsRemoveModal(_SetupModal, title="🗑️ Remove Words from Filter"):
+    def __init__(self, guild, followup, message_id):
+        super().__init__(guild, followup, message_id, 'automod_words')
+        self.words_inp = discord.ui.TextInput(
+            label="Words to remove (comma-separated)",
+            placeholder="badword1, badword2",
+            style=discord.TextStyle.paragraph, required=True, max_length=1000)
+        self.add_item(self.words_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        raw   = str(self.words_inp)
+        words = [w.strip().lower() for w in raw.split(',') if w.strip()]
+        async with aiosqlite.connect(DB) as db:
+            for w in words:
+                await db.execute(
+                    "DELETE FROM automod_words WHERE guild_id=? AND word=?",
+                    (self.setup_guild.id, w))
+            await db.commit()
+        await self._save_and_refresh(i)
+
+
+class TriggerAddModal(_SetupModal, title="⚡ Add Trigger"):
+    def __init__(self, guild, followup, message_id):
+        super().__init__(guild, followup, message_id, 'triggers')
+        self.trig_inp  = discord.ui.TextInput(label="Trigger text",                                         required=True,  max_length=100)
+        self.resp_inp  = discord.ui.TextInput(label="Response (text or image URL)",                         required=True,  max_length=500,
+                                              style=discord.TextStyle.paragraph)
+        self.match_inp = discord.ui.TextInput(label="Match type: contains / startswith",
+                                              default="contains",                                            required=False, max_length=20)
+        for inp in [self.trig_inp, self.resp_inp, self.match_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        trig  = str(self.trig_inp).strip().lower()
+        resp  = str(self.resp_inp).strip()
+        mtype = str(self.match_inp).strip().lower()
+        if mtype not in ('contains', 'startswith'):
+            mtype = 'contains'
+        async with aiosqlite.connect(DB) as db:
+            await db.execute(
+                "INSERT INTO triggers (guild_id,trigger,response,match_type) VALUES (?,?,?,?)",
+                (self.setup_guild.id, trig, resp, mtype))
+            await db.commit()
+        await self._save_and_refresh(i)
+
+
+class TriggerDeleteModal(_SetupModal, title="🗑️ Delete Trigger by ID"):
+    def __init__(self, guild, followup, message_id):
+        super().__init__(guild, followup, message_id, 'triggers')
+        self.id_inp = discord.ui.TextInput(label="Trigger ID (from the list above)",
+                                           placeholder="e.g. 3", required=True, max_length=10)
+        self.add_item(self.id_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        try:
+            tid = int(str(self.id_inp).strip())
+        except ValueError:
+            try: await i.response.send_message("❌ Invalid ID.", ephemeral=True)
+            except Exception: pass
+            return
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute(
+                "DELETE FROM triggers WHERE id=? AND guild_id=?", (tid, self.setup_guild.id))
+            await db.commit()
+        if cur.rowcount == 0:
+            try: await i.response.send_message(f"❌ Trigger #{tid} not found.", ephemeral=True)
+            except Exception: pass
+        await self._save_and_refresh(i)
+
+
+class CustomCmdAddModal(_SetupModal, title="🔧 Add Custom Command"):
+    def __init__(self, guild, followup, message_id):
+        super().__init__(guild, followup, message_id, 'customcmds')
+        self.name_inp = discord.ui.TextInput(label="Command name (no prefix)", placeholder="e.g. rules",       required=True,  max_length=30)
+        self.type_inp = discord.ui.TextInput(label="Type: message / ping / alias",   default="message",         required=False, max_length=10)
+        self.val_inp  = discord.ui.TextInput(label="Value (text, @mention, or command name)",
+                                             style=discord.TextStyle.paragraph, required=True, max_length=500)
+        for inp in [self.name_inp, self.type_inp, self.val_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        name  = str(self.name_inp).strip().lower()
+        atype = str(self.type_inp).strip().lower()
+        if atype not in ('message', 'ping', 'alias'):
+            atype = 'message'
+        val   = str(self.val_inp).strip()
+        async with aiosqlite.connect(DB) as db:
+            try:
+                await db.execute(
+                    "INSERT INTO custom_commands (guild_id,name,action_type,value) VALUES (?,?,?,?)",
+                    (self.setup_guild.id, name, atype, val))
+                await db.commit()
+            except Exception:
+                try: await i.response.send_message(f"❌ `{name}` already exists.", ephemeral=True)
+                except Exception: pass
+                return
+        await self._save_and_refresh(i)
+
+
+class CustomCmdDeleteModal(_SetupModal, title="🗑️ Delete Custom Command"):
+    def __init__(self, guild, followup, message_id):
+        super().__init__(guild, followup, message_id, 'customcmds')
+        self.name_inp = discord.ui.TextInput(label="Command name to delete", placeholder="e.g. rules", required=True, max_length=30)
+        self.add_item(self.name_inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        name = str(self.name_inp).strip().lower()
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute(
+                "DELETE FROM custom_commands WHERE guild_id=? AND name=?",
+                (self.setup_guild.id, name))
+            await db.commit()
+        if cur.rowcount == 0:
+            try: await i.response.send_message(f"❌ `{name}` not found.", ephemeral=True)
+            except Exception: pass
+        await self._save_and_refresh(i)
+
+
+class CmdPermsModal(_SetupModal, title="🔑 Command Permissions"):
+    def __init__(self, guild, followup, message_id, defaults=None):
+        super().__init__(guild, followup, message_id, 'cmdperms')
+        self.cmd_inp   = discord.ui.TextInput(label="Command name (without / or prefix)", placeholder="e.g. roast", required=True, max_length=40)
+        self.role_inp  = discord.ui.TextInput(label="Required role (name/ID or 'none' = everyone)", placeholder="none", required=False, max_length=100)
+        self.allow_inp = discord.ui.TextInput(label="Allow use? (yes/no)",             default="yes",  required=False, max_length=3)
+        self.show_inp  = discord.ui.TextInput(label="Show in /help? (yes/no)",         default="yes",  required=False, max_length=3)
+        self.silent_inp= discord.ui.TextInput(label="Fail silently? (yes/no)",         default="no",   required=False, max_length=3)
+        for inp in [self.cmd_inp, self.role_inp, self.allow_inp, self.show_inp, self.silent_inp]:
+            self.add_item(inp)
+
+    async def on_submit(self, i: discord.Interaction):
+        def yn(inp, default=True):
+            t = str(inp).strip().lower()
+            if t in ('yes','y','true','1'): return True
+            if t in ('no','n','false','0'): return False
+            return default
+
+        cmd    = str(self.cmd_inp).strip().lower()
+        r_text = str(self.role_inp).strip()
+        allow  = yn(self.allow_inp, True)
+        show   = yn(self.show_inp,  True)
+        silent = yn(self.silent_inp, False)
+
+        role_id = 0
+        if r_text and r_text.lower() not in ('none', 'everyone', '-', ''):
+            r = await _parse_role(self.setup_guild, r_text)
+            if r and r != 'INVALID':
+                role_id = r.id
+            elif r == 'INVALID':
+                try: await i.response.send_message(f"⚠️ Role `{r_text}` not found — saving other settings.", ephemeral=True)
+                except Exception: pass
+
+        async with aiosqlite.connect(DB) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO command_perms"
+                " (guild_id,command,role_id,allow_use,show_in_help,silent)"
+                " VALUES (?,?,?,?,?,?)",
+                (self.setup_guild.id, cmd, role_id, int(allow), int(show), int(silent)))
+            await db.commit()
+        await self._save_and_refresh(i)
+
+
 _MODAL_MAP = {
     'general': GeneralModal, 'logs': LogsModal, 'welcome': WelcomeModal,
     'roles': RolesModal, 'starboard': StarboardModal, 'jail': JailModal,
     'automod': AutomodModal, 'antiraid': AntiraidModal,
     'warns': WarnsModal, 'bloodtrials': BloodTrialsModal,
+    'cooldowns': CooldownsModal, 'cmdperms': CmdPermsModal,
 }
 
 # ── Buttons ──
@@ -1162,27 +1501,83 @@ class _BackBtn(discord.ui.Button):
 
 # ── Views ──
 
+class _AddBtn(discord.ui.Button):
+    """Generic 'Add' button for list-based categories."""
+    def __init__(self, cat: str, guild: discord.Guild, modal_cls, label: str = "➕ Add"):
+        super().__init__(label=label, style=discord.ButtonStyle.success, row=1)
+        self.cat       = cat
+        self.setup_guild = guild
+        self.modal_cls = modal_cls
+
+    async def callback(self, i: discord.Interaction):
+        modal = self.modal_cls(guild=i.guild, followup=i.followup, message_id=i.message.id)
+        await i.response.send_modal(modal)
+
+
+class _DeleteBtn(discord.ui.Button):
+    """Generic 'Delete/Remove' button for list-based categories."""
+    def __init__(self, cat: str, guild: discord.Guild, modal_cls, label: str = "🗑️ Delete"):
+        super().__init__(label=label, style=discord.ButtonStyle.danger, row=1)
+        self.cat       = cat
+        self.setup_guild = guild
+        self.modal_cls = modal_cls
+
+    async def callback(self, i: discord.Interaction):
+        modal = self.modal_cls(guild=i.guild, followup=i.followup, message_id=i.message.id)
+        await i.response.send_modal(modal)
+
+
 class CategoryView(discord.ui.View):
     def __init__(self, cat: str, guild: discord.Guild):
         super().__init__(timeout=300)
-        self.add_item(_ConfigureBtn(cat, guild))
-        if cat in ('automod', 'antiraid'):
+
+        if cat == 'automod_words':
+            self.add_item(_AddBtn(cat, guild, AutomodWordsAddModal,    "➕ Add Words"))
+            self.add_item(_DeleteBtn(cat, guild, AutomodWordsRemoveModal, "🗑️ Remove Words"))
+
+        elif cat == 'triggers':
+            self.add_item(_AddBtn(cat, guild, TriggerAddModal,    "➕ Add Trigger"))
+            self.add_item(_DeleteBtn(cat, guild, TriggerDeleteModal, "🗑️ Delete Trigger"))
+
+        elif cat == 'customcmds':
+            self.add_item(_AddBtn(cat, guild, CustomCmdAddModal,    "➕ Add Command"))
+            self.add_item(_DeleteBtn(cat, guild, CustomCmdDeleteModal, "🗑️ Delete Command"))
+
+        elif cat in ('automod', 'antiraid'):
+            self.add_item(_ConfigureBtn(cat, guild))
             self.add_item(_ToggleBtn(cat, guild))
+            if cat == 'automod':
+                # Quick-link to the word list sub-page
+                class _WordsBtn(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(label="📝 Manage Words", style=discord.ButtonStyle.secondary, row=1)
+                    async def callback(self_, i: discord.Interaction):
+                        embed = await _build_cat_embed(i.guild, 'automod_words')
+                        await i.response.edit_message(embed=embed, view=CategoryView('automod_words', i.guild))
+                self.add_item(_WordsBtn())
+
+        else:
+            self.add_item(_ConfigureBtn(cat, guild))
+
         self.add_item(_BackBtn())
 
 class SetupCategorySelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="⚙️ General",         value="general",     description="Prefix and overview"),
-            discord.SelectOption(label="📋 Log Channels",    value="logs",        description="Mod / message / member / server logs"),
-            discord.SelectOption(label="👋 Welcome",          value="welcome",     description="Welcome channel and message"),
-            discord.SelectOption(label="🎭 Roles",            value="roles",       description="Autorole, jail, deadchat roles"),
-            discord.SelectOption(label="⭐ Starboard",        value="starboard",   description="Starboard channel, emoji, threshold"),
-            discord.SelectOption(label="🔒 Jail",             value="jail",        description="Jail channel and role"),
-            discord.SelectOption(label="🛡️ Automod",         value="automod",     description="Word filter action and settings"),
-            discord.SelectOption(label="🚨 Anti-Raid",        value="antiraid",    description="Anti-raid toggle and settings"),
-            discord.SelectOption(label="⚠️ Warn Thresholds", value="warns",       description="Auto-kick / ban / mute on warn count"),
-            discord.SelectOption(label="📖 Blood Trials",    value="bloodtrials", description="Chapter and character channels"),
+            discord.SelectOption(label="⚙️ General",           value="general",      description="Prefix"),
+            discord.SelectOption(label="📋 Log Channels",      value="logs",         description="Mod / message / member / server logs"),
+            discord.SelectOption(label="👋 Welcome",            value="welcome",      description="Welcome channel and message"),
+            discord.SelectOption(label="🎭 Roles",              value="roles",        description="Autorole, jail, deadchat roles"),
+            discord.SelectOption(label="⭐ Starboard",          value="starboard",    description="Starboard channel, emoji, threshold"),
+            discord.SelectOption(label="🔒 Jail",               value="jail",         description="Jail channel and role"),
+            discord.SelectOption(label="🛡️ Automod",           value="automod",      description="Word filter action, toggle, word list"),
+            discord.SelectOption(label="🚨 Anti-Raid",          value="antiraid",     description="Anti-raid toggle and settings"),
+            discord.SelectOption(label="⚠️ Warn Thresholds",   value="warns",        description="Auto-kick / ban / mute on warn count"),
+            discord.SelectOption(label="⏱️ Cooldowns",         value="cooldowns",    description="Per-command cooldown overrides"),
+            discord.SelectOption(label="⚡ Triggers",           value="triggers",     description="Auto-respond to keywords"),
+            discord.SelectOption(label="🔧 Custom Commands",   value="customcmds",   description="Add/remove custom prefix commands"),
+            discord.SelectOption(label="🔑 Command Perms",     value="cmdperms",     description="Restrict who can use any command"),
+            discord.SelectOption(label="📖 Blood Trials",      value="bloodtrials",  description="Chapter and character channels"),
         ]
         super().__init__(placeholder="Choose a category…", options=options, row=0)
 
@@ -2497,6 +2892,20 @@ async def _run_triggers(message: discord.Message) -> bool:
 
 # – SECTION 13: FUN COMMANDS ———————————————––
 
+ROAST_PROMPT = (
+    "You are Umar, a Nigerian guy with zero filter and a gift for precision roasts. "
+    "Your job: write ONE roast (2-3 sentences MAX) that makes everyone in the chat go 'DAMN'. "
+    "Rules:\n"
+    "- Mine the username/display name for material — wordplay, what it implies about their personality, "
+    "their life choices, their self-image. If the name is mid, say so.\n"
+    "- Be SPECIFIC. Vague insults are coward behaviour. Point at something exact and twist it.\n"
+    "- Escalate. Start with an observation, then land the killing blow on the last sentence.\n"
+    "- Dry > loud. The best roasts sound almost calm. No exclamation marks, no emojis.\n"
+    "- Avoid: looks, weight, race, anything that's just pure cruelty with no wit. "
+    "The goal is FUNNY, not just mean.\n"
+    "- No setup like 'Okay here goes' or 'Oof'. Just the roast, plain text."
+)
+
 EIGHTBALL = [
     "It is certain.", "Without a doubt.", "Yes, definitely.", "As I see it, yes.",
     "You may rely on it.", "Reply hazy, try again.", "Ask again later.",
@@ -2573,21 +2982,11 @@ async def cmd_roast(i: discord.Interaction, target: discord.Member):
             groq_client.chat.completions.create,
             model=GROQ_MODEL,
             messages=[
-                {"role": "system", "content": (
-                    "You are Umar — a savage Nigerian guy who absolutely demolishes people with roasts. "
-                    "No mercy, no sugarcoating. Roasts must be SPECIFIC and PERSONAL — reference their username "
-                    "or display name creatively. Hit where it hurts: their personality, their life choices, "
-                    "their online presence, their vibe. Dry, surgical, genuinely funny. "
-                    "No generic 'you're ugly/dumb' trash. Actually make them feel it. "
-                    "Two sentences max. Plain text, no markdown."
-                )},
-                {"role": "user", "content": (
-                    f"Roast this person hard. Their username/display name is '{target.display_name}'. "
-                    f"Make it personal, make it sting, make people in the chat genuinely laugh. No fluff."
-                )}
+                {"role": "system", "content": ROAST_PROMPT},
+                {"role": "user",   "content": f"Roast this person. Display name: '{target.display_name}'."}
             ],
             max_tokens=150,
-            temperature=1.0,
+            temperature=1.1,
         )
         await i.followup.send(f"{target.mention} 🔥 {resp.choices[0].message.content}")
     except Exception as ex:
@@ -3195,21 +3594,11 @@ async def pfx_roast(ctx: commands.Context, member: discord.Member = None):
                 groq_client.chat.completions.create,
                 model=GROQ_MODEL,
                 messages=[
-                    {"role": "system", "content": (
-                        "You are Umar — a savage Nigerian guy who absolutely demolishes people with roasts. "
-                        "No mercy, no sugarcoating. Roasts must be SPECIFIC and PERSONAL — reference their username "
-                        "or display name creatively. Hit where it hurts: their personality, their life choices, "
-                        "their online presence, their vibe. Dry, surgical, genuinely funny. "
-                        "No generic 'you're ugly/dumb' trash. Actually make them feel it. "
-                        "Two sentences max. Plain text, no markdown."
-                    )},
-                    {"role": "user", "content": (
-                        f"Roast this person hard. Their username/display name is '{member.display_name}'. "
-                        f"Make it personal, make it sting, make people in the chat genuinely laugh. No fluff."
-                    )}
+                    {"role": "system", "content": ROAST_PROMPT},
+                    {"role": "user",   "content": f"Roast this person. Display name: '{member.display_name}'."}
                 ],
                 max_tokens=150,
-                temperature=1.0,
+                temperature=1.1,
             )
             await ctx.send(f"{member.mention} 🔥 {resp.choices[0].message.content}")
         except Exception as ex:
@@ -3262,7 +3651,96 @@ async def pfx_snipe(ctx: commands.Context):
         embeds=_build_snipe_embeds(cache[0], 1, len(cache)),
         view=view if len(cache) > 1 else None)
 
-@bot.command(name="afk")
+# ── Edit Snipe ──
+
+def _build_esnipe_embed(entry: dict, idx: int, total: int) -> discord.Embed:
+    ts  = entry["time"]
+    rel = f"<t:{int(ts.timestamp())}:R>"
+    e   = discord.Embed(color=0xFFAA00, timestamp=ts)
+    e.set_author(name=entry["author"], icon_url=entry["avatar"])
+    e.add_field(
+        name="Before",
+        value=(entry["before"][:500] or "*empty*"),
+        inline=False)
+    e.add_field(
+        name="After",
+        value=(entry["after"][:500] or "*empty*"),
+        inline=False)
+    e.add_field(name="Jump", value=f"[Go to message]({entry['jump']})", inline=True)
+    e.set_footer(text=f"Edited {rel} · {idx}/{total}")
+    return e
+
+
+class EditSnipeView(discord.ui.View):
+    def __init__(self, cache: list[dict], invoker_id: int):
+        super().__init__(timeout=120)
+        self.cache    = cache
+        self.invoker  = invoker_id
+        self.index    = 0
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_btn.disabled = self.index == 0
+        self.next_btn.disabled = self.index >= len(self.cache) - 1
+        self.counter.label     = f"{self.index + 1} / {len(self.cache)}"
+
+    async def _check(self, i: discord.Interaction) -> bool:
+        if i.user.id != self.invoker:
+            await i.response.send_message("These aren't yours.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(emoji="◀", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, i: discord.Interaction, _: discord.ui.Button):
+        if not await self._check(i): return
+        self.index -= 1
+        self._update_buttons()
+        await i.response.edit_message(
+            embed=_build_esnipe_embed(self.cache[self.index], self.index + 1, len(self.cache)),
+            view=self)
+
+    @discord.ui.button(label="1 / 1", style=discord.ButtonStyle.primary, disabled=True)
+    async def counter(self, i: discord.Interaction, _: discord.ui.Button):
+        await i.response.defer()
+
+    @discord.ui.button(emoji="▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, i: discord.Interaction, _: discord.ui.Button):
+        if not await self._check(i): return
+        self.index += 1
+        self._update_buttons()
+        await i.response.edit_message(
+            embed=_build_esnipe_embed(self.cache[self.index], self.index + 1, len(self.cache)),
+            view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+@bot.tree.command(name="esnipe", description="Show recently edited messages (last 12h)")
+async def cmd_esnipe(i: discord.Interaction):
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    cache  = [e for e in edit_snipe_cache.get(i.channel.id, []) if e["time"] > cutoff]
+    if not cache:
+        await i.response.send_message("No edits sniped in the last 12 hours ✏️", ephemeral=True)
+        return
+    view = EditSnipeView(cache, i.user.id)
+    await i.response.send_message(
+        embed=_build_esnipe_embed(cache[0], 1, len(cache)),
+        view=view if len(cache) > 1 else None)
+
+@bot.command(name="esnipe")
+async def pfx_esnipe(ctx: commands.Context):
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    cache  = [e for e in edit_snipe_cache.get(ctx.channel.id, []) if e["time"] > cutoff]
+    if not cache:
+        await ctx.reply("No edits sniped in the last 12 hours ✏️"); return
+    view = EditSnipeView(cache, ctx.author.id)
+    await ctx.send(
+        embed=_build_esnipe_embed(cache[0], 1, len(cache)),
+        view=view if len(cache) > 1 else None)
+
+
 async def pfx_afk(ctx: commands.Context, *, reason: str = None):
     async with aiosqlite.connect(DB) as db:
         await db.execute(
@@ -4306,6 +4784,22 @@ async def on_message_edit(before: discord.Message, after: discord.Message):
         return
     if before.content == after.content:
         return
+
+    # Store for esnipe — keep up to 3, expire after 12h
+    entry = {
+        "before":     before.content or "",
+        "after":      after.content  or "",
+        "author":     before.author.display_name,
+        "author_tag": str(before.author),
+        "avatar":     str(before.author.display_avatar.url),
+        "time":       datetime.now(timezone.utc),
+        "jump":       after.jump_url,
+    }
+    cache  = edit_snipe_cache[before.channel.id]
+    cache.insert(0, entry)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    edit_snipe_cache[before.channel.id] = [e for e in cache if e["time"] > cutoff][:3]
+
     e = discord.Embed(title="✏️ Message Edited", color=0xFFAA00,
                       timestamp=datetime.now(timezone.utc))
     e.set_author(name=str(before.author), icon_url=before.author.display_avatar.url)
