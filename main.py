@@ -2366,18 +2366,107 @@ async def cmd_remind(i: discord.Interaction, time: str, message: str):
     await i.response.send_message(
         f"⏰ Set! I'll remind you in **{time}**: {message}", ephemeral=True)
 
-@bot.tree.command(name="snipe", description="Show last deleted messages")
-async def cmd_snipe(i: discord.Interaction):
-    cache = snipe_cache.get(i.channel.id, [])
-    if not cache:
-        await i.response.send_message("Nothing to snipe 🏹", ephemeral=True); return
+def _build_snipe_embeds(entry: dict, idx: int, total: int) -> list[discord.Embed]:
+    """Build 1-2 embeds for a single snipe entry (reply context + main message)."""
     embeds = []
-    for idx, msg in enumerate(cache, 1):
-        e = discord.Embed(description=msg["content"], color=0x5865F2, timestamp=msg["time"])
-        e.set_author(name=msg["author"], icon_url=msg["avatar"])
-        e.set_footer(text=f"#{idx}")
-        embeds.append(e)
-    await i.response.send_message(embeds=embeds)
+
+    # ── Reply context embed (shown above if message was a reply) ──
+    if entry.get("reply"):
+        r = entry["reply"]
+        re = discord.Embed(color=0x2B2D31)
+        re.set_author(
+            name=f"↩ Replying to {r['author']}",
+            icon_url=r["avatar"])
+        if r["content"]:
+            re.description = r["content"]
+        if r.get("image"):
+            re.set_image(url=r["image"])
+        embeds.append(re)
+
+    # ── Main deleted message embed ──
+    ts   = entry["time"]
+    rel  = f"<t:{int(ts.timestamp())}:R>"
+    text = entry["content"]
+
+    me = discord.Embed(color=0xED4245, timestamp=ts)
+    me.set_author(name=entry["author"], icon_url=entry["avatar"])
+
+    if text:
+        me.description = text[:2000]
+
+    # Attach first image if any
+    if entry.get("attachments"):
+        me.set_image(url=entry["attachments"][0])
+        extra = len(entry["attachments"]) - 1
+        if extra:
+            me.add_field(name="📎 Attachments", value=f"+{extra} more file(s)", inline=True)
+
+    me.set_footer(text=f"Deleted {rel} · {idx}/{total}")
+    embeds.append(me)
+    return embeds
+
+
+class SnipeView(discord.ui.View):
+    def __init__(self, cache: list[dict], invoker_id: int):
+        super().__init__(timeout=120)
+        self.cache     = cache
+        self.invoker   = invoker_id
+        self.index     = 0
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_btn.disabled = self.index == 0
+        self.next_btn.disabled = self.index >= len(self.cache) - 1
+        self.counter.label     = f"{self.index + 1} / {len(self.cache)}"
+
+    async def _check(self, i: discord.Interaction) -> bool:
+        if i.user.id != self.invoker:
+            await i.response.send_message("These aren't your sniped messages.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(emoji="◀", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, i: discord.Interaction, _: discord.ui.Button):
+        if not await self._check(i): return
+        self.index -= 1
+        self._update_buttons()
+        await i.response.edit_message(
+            embeds=_build_snipe_embeds(self.cache[self.index],
+                                       self.index + 1, len(self.cache)),
+            view=self)
+
+    @discord.ui.button(label="1 / 1", style=discord.ButtonStyle.primary, disabled=True)
+    async def counter(self, i: discord.Interaction, _: discord.ui.Button):
+        await i.response.defer()
+
+    @discord.ui.button(emoji="▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, i: discord.Interaction, _: discord.ui.Button):
+        if not await self._check(i): return
+        self.index += 1
+        self._update_buttons()
+        await i.response.edit_message(
+            embeds=_build_snipe_embeds(self.cache[self.index],
+                                       self.index + 1, len(self.cache)),
+            view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+@bot.tree.command(name="snipe", description="Show recently deleted messages (up to 3, last 12h)")
+async def cmd_snipe(i: discord.Interaction):
+    # Expire old entries on read
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    cache  = [e for e in snipe_cache.get(i.channel.id, []) if e["time"] > cutoff]
+    if not cache:
+        await i.response.send_message("Nothing sniped in the last 12 hours 🏹", ephemeral=True)
+        return
+    view = SnipeView(cache, i.user.id)
+    await i.response.send_message(
+        embeds=_build_snipe_embeds(cache[0], 1, len(cache)),
+        view=view if len(cache) > 1 else None)
+
 
 @bot.tree.command(name="afk", description="Set yourself AFK")
 async def cmd_afk(i: discord.Interaction, reason: str = None):
@@ -2893,16 +2982,14 @@ async def pfx_remind(ctx: commands.Context, time: str, *, message: str):
 
 @bot.command(name="snipe")
 async def pfx_snipe(ctx: commands.Context):
-    cache = snipe_cache.get(ctx.channel.id, [])
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    cache  = [e for e in snipe_cache.get(ctx.channel.id, []) if e["time"] > cutoff]
     if not cache:
-        await ctx.reply("Nothing to snipe 🏹"); return
-    embeds = []
-    for idx, msg in enumerate(cache, 1):
-        e = discord.Embed(description=msg["content"], color=0x5865F2, timestamp=msg["time"])
-        e.set_author(name=msg["author"], icon_url=msg["avatar"])
-        e.set_footer(text=f"#{idx}")
-        embeds.append(e)
-    await ctx.send(embeds=embeds)
+        await ctx.reply("Nothing sniped in the last 12 hours 🏹"); return
+    view = SnipeView(cache, ctx.author.id)
+    await ctx.send(
+        embeds=_build_snipe_embeds(cache[0], 1, len(cache)),
+        view=view if len(cache) > 1 else None)
 
 @bot.command(name="afk")
 async def pfx_afk(ctx: commands.Context, *, reason: str = None):
@@ -3008,17 +3095,55 @@ async def pfx_quote(ctx: commands.Context):
     except Exception:
         await ctx.reply("❌ Couldn't fetch that message."); return
     async with ctx.typing():
+        embeds = []
+
+        # ── Reply context (if quoted message was itself a reply) ──
+        if ref.reference and ref.reference.message_id:
+            try:
+                parent = await ctx.channel.fetch_message(ref.reference.message_id)
+                pe = discord.Embed(color=0x2B2D31)
+                pe.set_author(
+                    name=f"↩ Replying to {parent.author.display_name}",
+                    icon_url=str(parent.author.display_avatar.url))
+                if parent.content:
+                    pe.description = parent.content[:512]
+                if parent.attachments:
+                    pe.set_image(url=parent.attachments[0].url)
+                embeds.append(pe)
+            except Exception:
+                pass
+
+        # ── Main quoted message ──
+        role_col = getattr(ref.author, 'color', discord.Color.default())
+        color    = role_col if role_col != discord.Color.default() else discord.Color(0x5865F2)
+
+        qe = discord.Embed(color=color, timestamp=ref.created_at)
+        qe.set_author(
+            name=ref.author.display_name,
+            icon_url=str(ref.author.display_avatar.url))
+
+        if ref.content:
+            qe.description = ref.content[:2000]
+
+        if ref.attachments:
+            qe.set_image(url=ref.attachments[0].url)
+            if len(ref.attachments) > 1:
+                qe.add_field(
+                    name="📎 Attachments",
+                    value="\n".join(f"[File {n+1}]({a.url})"
+                                    for n, a in enumerate(ref.attachments[1:5])),
+                    inline=False)
+
+        qe.add_field(name="​", value=f"[Jump to message]({ref.jump_url})", inline=False)
+        qe.set_footer(text=f"Quoted by {ctx.author.display_name} · #{ctx.channel.name}")
+        embeds.append(qe)
+
+        # Try the fancy image card first, fall back to embeds
         try:
             buf = await build_quote_image(ref)
             await ctx.send(file=discord.File(buf, filename="quote.png"))
-        except Exception as ex:
-            print(f"Quote image error: {ex}")
-            e = discord.Embed(description=ref.content[:2000] or "*[no text]*",
-                              color=0x5865F2, timestamp=ref.created_at)
-            e.set_author(name=ref.author.display_name,
-                         icon_url=ref.author.display_avatar.url)
-            e.add_field(name="Source", value=f"[Jump]({ref.jump_url})")
-            await ctx.send(embed=e)
+        except Exception:
+            await ctx.send(embeds=embeds)
 
 @bot.command(name="coinflip")
 async def pfx_coinflip(ctx: commands.Context):
@@ -3865,14 +3990,36 @@ async def _run_custom_command(message: discord.Message):
 async def on_message_delete(message: discord.Message):
     if message.author.bot:
         return
+
+    # Build reply context if it existed
+    reply_data = None
+    if message.reference and message.reference.message_id:
+        try:
+            parent = await message.channel.fetch_message(message.reference.message_id)
+            reply_data = {
+                "author":  parent.author.display_name,
+                "avatar":  str(parent.author.display_avatar.url),
+                "content": parent.content[:300] if parent.content else "*[no text]*",
+                "image":   parent.attachments[0].url if parent.attachments else None,
+            }
+        except Exception:
+            pass
+
+    entry = {
+        "content":    message.content or "",
+        "author":     message.author.display_name,
+        "author_tag": str(message.author),
+        "avatar":     str(message.author.display_avatar.url),
+        "time":       datetime.now(timezone.utc),
+        "attachments": [a.url for a in message.attachments],
+        "reply":      reply_data,
+    }
     cache = snipe_cache[message.channel.id]
-    cache.insert(0, {
-        "content": message.content or "*[no text]*",
-        "author":  str(message.author),
-        "avatar":  message.author.display_avatar.url,
-        "time":    datetime.now(timezone.utc)
-    })
-    snipe_cache[message.channel.id] = cache[:3]
+    cache.insert(0, entry)
+    # Keep up to 3, expire entries older than 12 hours
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+    snipe_cache[message.channel.id] = [e for e in cache if e["time"] > cutoff][:3]
+
     if not message.guild:
         return
     e = discord.Embed(title="🗑️ Message Deleted", color=0xFF4444,
@@ -4124,27 +4271,66 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             sb_channel = await bot.fetch_channel(int(sb_ch_id))
         except Exception:
             return
-    e = discord.Embed(color=0xFFD700, timestamp=message.created_at)
-    e.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
-    if message.content:
-        e.description = message.content[:2048]
-    if message.attachments:
-        e.set_image(url=message.attachments[0].url)
-    e.add_field(name="Source", value=f"[Jump]({message.jump_url})")
+
     embeds = []
-    if message.reference:
+
+    # ── Reply context embed ──
+    if message.reference and message.reference.message_id:
         try:
             parent = await channel.fetch_message(message.reference.message_id)
-            pe = discord.Embed(color=0xB8860B,
-                               description=f"**Replying to {parent.author.mention}:**\n{parent.content[:512]}")
-            pe.set_author(name=str(parent.author), icon_url=parent.author.display_avatar.url)
+            pe = discord.Embed(color=0x2B2D31)
+            pe.set_author(
+                name=f"↩ Replying to {parent.author.display_name}",
+                icon_url=str(parent.author.display_avatar.url))
+            if parent.content:
+                pe.description = parent.content[:512]
+            if parent.attachments:
+                pe.set_image(url=parent.attachments[0].url)
             embeds.append(pe)
         except Exception:
             pass
+
+    # ── Main starboard embed ──
+    role_col = getattr(message.author, 'color', discord.Color.default())
+    color    = role_col if role_col != discord.Color.default() else discord.Color(0xFFD700)
+
+    e = discord.Embed(color=color, timestamp=message.created_at)
+    e.set_author(
+        name=message.author.display_name,
+        icon_url=str(message.author.display_avatar.url))
+
+    if message.content:
+        e.description = message.content[:2000]
+
+    # First attachment as main image
+    if message.attachments:
+        first = message.attachments[0]
+        if any(first.filename.lower().endswith(ext)
+               for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")):
+            e.set_image(url=first.url)
+        else:
+            e.add_field(name="📎 Attachment", value=f"[{first.filename}]({first.url})", inline=False)
+        # Extra attachments
+        for att in message.attachments[1:4]:
+            e.add_field(name="📎", value=f"[{att.filename}]({att.url})", inline=True)
+
+    # Embeds from the original message (e.g. link previews with images)
+    for orig_embed in message.embeds[:1]:
+        if orig_embed.image and not message.attachments:
+            e.set_image(url=orig_embed.image.url)
+        elif orig_embed.thumbnail and not message.attachments:
+            e.set_thumbnail(url=orig_embed.thumbnail.url)
+
+    e.add_field(
+        name="​",
+        value=f"[Jump to message]({message.jump_url}) · <#{message.channel.id}>",
+        inline=False)
+    e.set_footer(text=f"{emoji} {reaction_count} reaction{'s' if reaction_count != 1 else ''}")
     embeds.append(e)
+
     try:
         await sb_channel.send(
-            content=f"{emoji} **{reaction_count}** | {message.author.mention}",
+            content=f"{emoji} **{reaction_count}** · {message.author.mention}",
             embeds=embeds,
             allowed_mentions=discord.AllowedMentions(users=True))
     except discord.Forbidden:
