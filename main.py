@@ -2549,26 +2549,86 @@ async def _send_animal(send_fn, animal: str):
     await send_fn(embed=e)
 
 # Slash animal commands
-for _animal in ANIMAL_APIS:
-    def _make_slash(a):
-        @bot.tree.command(name=a, description=f"Get a random {a} pic")
-        async def _cmd(i: discord.Interaction, _a=a):
-            await i.response.defer()
-            await _send_animal(i.followup.send, _a)
-        _cmd.__name__ = f"cmd_{a}"
-        return _cmd
-    _make_slash(_animal)
+@bot.tree.command(name="cat",     description="Random cat pic 🐱")
+async def _animal_cat(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "cat")
+
+@bot.tree.command(name="dog",     description="Random dog pic 🐶")
+async def _animal_dog(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "dog")
+
+@bot.tree.command(name="fox",     description="Random fox pic 🦊")
+async def _animal_fox(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "fox")
+
+@bot.tree.command(name="duck",    description="Random duck pic 🦆")
+async def _animal_duck(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "duck")
+
+@bot.tree.command(name="panda",   description="Random panda pic 🐼")
+async def _animal_panda(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "panda")
+
+@bot.tree.command(name="bunny",   description="Random bunny pic 🐰")
+async def _animal_bunny(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "bunny")
+
+@bot.tree.command(name="koala",   description="Random koala pic 🐨")
+async def _animal_koala(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "koala")
+
+@bot.tree.command(name="bird",    description="Random bird pic 🐦")
+async def _animal_bird(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "bird")
+
+@bot.tree.command(name="hamster", description="Random hamster pic 🐹")
+async def _animal_hamster(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "hamster")
+
+@bot.tree.command(name="raccoon", description="Random raccoon pic 🦝")
+async def _animal_raccoon(i: discord.Interaction):
+    await i.response.defer(); await _send_animal(i.followup.send, "raccoon")
 
 # Prefix animal commands
-for _animal in ANIMAL_APIS:
-    def _make_prefix(a):
-        @bot.command(name=a)
-        async def _cmd(ctx: commands.Context, _a=a):
-            async with ctx.typing():
-                await _send_animal(ctx.send, _a)
-        _cmd.__name__ = f"pfx_{a}"
-        return _cmd
-    _make_prefix(_animal)
+@bot.command(name="cat")
+async def _pfx_cat(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "cat")
+
+@bot.command(name="dog")
+async def _pfx_dog(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "dog")
+
+@bot.command(name="fox")
+async def _pfx_fox(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "fox")
+
+@bot.command(name="duck")
+async def _pfx_duck(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "duck")
+
+@bot.command(name="panda")
+async def _pfx_panda(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "panda")
+
+@bot.command(name="bunny")
+async def _pfx_bunny(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "bunny")
+
+@bot.command(name="koala")
+async def _pfx_koala(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "koala")
+
+@bot.command(name="bird")
+async def _pfx_bird(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "bird")
+
+@bot.command(name="hamster")
+async def _pfx_hamster(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "hamster")
+
+@bot.command(name="raccoon")
+async def _pfx_raccoon(ctx: commands.Context):
+    async with ctx.typing(): await _send_animal(ctx.send, "raccoon")
 
 @bot.tree.command(name="calc", description="Calculate a math expression")
 async def cmd_calc(i: discord.Interaction, expression: str):
