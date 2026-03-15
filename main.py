@@ -26,7 +26,7 @@ print("Python:", sys.version)
 load_dotenv()
 
 TOKEN        = os.getenv("TOKEN")
-PREFIX       = os.getenv("PREFIX", "?")
+PREFIX       = os.getenv("PREFIX", ">")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
@@ -40,8 +40,6 @@ BOOK_LINK    = "https://btnovel.netlify.app/#chapters"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 
 groq_client   = Groq(api_key=GROQ_API_KEY)
-chat_histories: dict[int, list] = {}   
-MAX_HISTORY   = 30
 
 # UPDATED SYSTEM PROMPT – more natural & human (Naija guy vibe added)
 SYSTEM_PROMPT = """You are Umar — an 18-year-old Nigerian guy from Abuja. You ARE Umar, not a bot playing a role. Talk like a real guy, no robot stiffness.
@@ -573,21 +571,6 @@ async def build_quote_image(message: discord.Message) -> io.BytesIO:
 
 # – SECTION 5: GROQ –––––––––––––––––––––––––––––
 
-def groq_chat(user_id: int, user_msg: str, context_hint: str = None) -> str:
-    history = chat_histories.setdefault(user_id, [])
-    if context_hint:
-        history.append({"role": "system", "content": f"[Context: {context_hint}]"})
-    history.append({"role": "user", "content": user_msg})
-    if len(history) > MAX_HISTORY:
-        history[:] = history[-MAX_HISTORY:]
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
-    resp = groq_client.chat.completions.create(
-        model=GROQ_MODEL, messages=messages, max_tokens=800,
-        temperature=0.85,
-    )
-    reply = resp.choices[0].message.content
-    history.append({"role": "assistant", "content": reply})
-    return reply
 
 # – SECTION 6: BOT CLASS —————————————————–
 
@@ -2422,9 +2405,28 @@ async def cmd_deadchat(i: discord.Interaction):
         await i.response.send_message(
             f"⏳ Cooldown: **{'%dm %ds'%(m,s) if m else '%ds'%s}**", ephemeral=True); return
     set_cooldown(i.guild_id, i.user.id, "deadchat")
+    await i.response.defer()
     ping_id = await get_setting_int(i.guild.id, 'deadchat_role_id')
-    content = (f"<@&{ping_id}> " if ping_id else "") + random.choice(DEADCHAT_LINES)
-    await i.response.send_message(content, allowed_mentions=discord.AllowedMentions.all())
+    ping = f"<@&{ping_id}> " if ping_id else ""
+    try:
+        resp = await asyncio.to_thread(
+            groq_client.chat.completions.create,
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": (
+                    "You are Umar. Chat is dead — completely silent. Write ONE punchy line "
+                    "to revive the conversation. Could be a hot take, a wild question, "
+                    "something controversial, or just chaos energy. Keep it short (1-2 sentences). "
+                    "No hashtags, no emojis unless it adds something, plain text."
+                )},
+                {"role": "user", "content": "Chat just died. Say something to bring it back."}
+            ],
+            max_tokens=80, temperature=1.0,
+        )
+        line = resp.choices[0].message.content.strip()
+    except Exception:
+        line = random.choice(DEADCHAT_LINES)
+    await i.followup.send(ping + line, allowed_mentions=discord.AllowedMentions.all())
 
 @bot.tree.command(name="say", description="Make the bot say something")
 @app_commands.default_permissions(manage_messages=True)
@@ -2672,7 +2674,26 @@ async def cmd_urban(i: discord.Interaction, term: str):
 
 @bot.tree.command(name="topic", description="Post a random conversation starter")
 async def cmd_topic(i: discord.Interaction):
-    await i.response.send_message(f"💬 {random.choice(TOPICS)}")
+    await i.response.defer()
+    try:
+        resp = await asyncio.to_thread(
+            groq_client.chat.completions.create,
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": (
+                    "You are Umar. Generate ONE fresh conversation starter for a Discord server. "
+                    "Make it interesting — could be a hot take, a hypothetical, a debate topic, "
+                    "something personal, or something random but compelling. "
+                    "One sentence. No intro, no label, just the topic itself. Plain text."
+                )},
+                {"role": "user", "content": "Give me a conversation starter."}
+            ],
+            max_tokens=60, temperature=1.1,
+        )
+        topic = resp.choices[0].message.content.strip()
+    except Exception:
+        topic = random.choice(TOPICS)
+    await i.followup.send(f"💬 {topic}")
 
 @bot.tree.command(name="firstmessage",
                   description="Link to a member's first message in this channel")
@@ -2906,8 +2927,27 @@ async def pfx_deadchat(ctx: commands.Context):
         await ctx.reply(f"⏳ Cooldown: **{'%dm %ds'%(m,s) if m else '%ds'%s}**"); return
     set_cooldown(ctx.guild.id, ctx.author.id, "deadchat")
     ping_id = await get_setting_int(ctx.guild.id, 'deadchat_role_id')
-    content = (f"<@&{ping_id}> " if ping_id else "") + random.choice(DEADCHAT_LINES)
-    await ctx.send(content, allowed_mentions=discord.AllowedMentions.all())
+    ping = f"<@&{ping_id}> " if ping_id else ""
+    async with ctx.typing():
+        try:
+            resp = await asyncio.to_thread(
+                groq_client.chat.completions.create,
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": (
+                        "You are Umar. Chat is dead — completely silent. Write ONE punchy line "
+                        "to revive the conversation. Could be a hot take, a wild question, "
+                        "something controversial, or just chaos energy. Keep it short (1-2 sentences). "
+                        "No hashtags, no emojis unless it adds something, plain text."
+                    )},
+                    {"role": "user", "content": "Chat just died. Say something to bring it back."}
+                ],
+                max_tokens=80, temperature=1.0,
+            )
+            line = resp.choices[0].message.content.strip()
+        except Exception:
+            line = random.choice(DEADCHAT_LINES)
+    await ctx.send(ping + line, allowed_mentions=discord.AllowedMentions.all())
 
 @bot.command(name="say")
 @commands.has_permissions(manage_messages=True)
@@ -3029,7 +3069,26 @@ async def pfx_urban(ctx: commands.Context, *, term: str):
 
 @bot.command(name="topic")
 async def pfx_topic(ctx: commands.Context):
-    await ctx.send(f"💬 {random.choice(TOPICS)}")
+    async with ctx.typing():
+        try:
+            resp = await asyncio.to_thread(
+                groq_client.chat.completions.create,
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": (
+                        "You are Umar. Generate ONE fresh conversation starter for a Discord server. "
+                        "Make it interesting — could be a hot take, a hypothetical, a debate topic, "
+                        "something personal, or something random but compelling. "
+                        "One sentence. No intro, no label, just the topic itself. Plain text."
+                    )},
+                    {"role": "user", "content": "Give me a conversation starter."}
+                ],
+                max_tokens=60, temperature=1.1,
+            )
+            topic = resp.choices[0].message.content.strip()
+        except Exception:
+            topic = random.choice(TOPICS)
+    await ctx.send(f"💬 {topic}")
 
 @bot.command(name="firstmessage")
 async def pfx_firstmessage(ctx: commands.Context, member: discord.Member = None):
@@ -3801,29 +3860,6 @@ async def _run_custom_command(message: discord.Message):
         if ctx.valid:
             await bot.invoke(ctx)
 
-async def _groq_respond(message: discord.Message):
-    recent = []
-    try:
-        async for m in message.channel.history(limit=6, before=message):
-            if not m.author.bot:
-                recent.append(f"{m.author.display_name}: {m.content[:100]}")
-    except Exception:
-        pass
-    context_hint = " | ".join(reversed(recent)) if recent else None
-    async with message.channel.typing():
-        try:
-            reply = await asyncio.to_thread(
-                groq_chat, message.author.id, message.content, context_hint)
-            if len(reply) <= 2000:
-                await message.reply(reply, mention_author=False)
-            else:
-                chunks = [reply[i:i+1990] for i in range(0, len(reply), 1990)]
-                await message.reply(chunks[0], mention_author=False)
-                for chunk in chunks[1:]:
-                    await message.channel.send(chunk)
-        except Exception as ex:
-            print(f"Groq error: {ex}")
-            await message.reply("brain froze, try again", mention_author=False)
 
 @bot.event
 async def on_message_delete(message: discord.Message):
