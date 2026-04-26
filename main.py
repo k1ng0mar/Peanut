@@ -571,7 +571,21 @@ async def build_quote_image(message: discord.Message) -> io.BytesIO:
     return buf
 
 # – SECTION 5: GROQ –––––––––––––––––––––––––––––
-
+def groq_chat(user_id: int, user_msg: str, context_hint: str = None) -> str:
+    history = chat_histories.setdefault(user_id, [])
+    if context_hint:
+        history.append({"role": "system", "content": f"[Context: {context_hint}]"})
+    history.append({"role": "user", "content": user_msg})
+    if len(history) > MAX_HISTORY:
+        history[:] = history[-MAX_HISTORY:]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+    resp = groq_client.chat.completions.create(
+        model=GROQ_MODEL, messages=messages, max_tokens=800,
+        temperature=0.85,
+    )
+    reply = resp.choices[0].message.content
+    history.append({"role": "assistant", "content": reply})
+    return reply
 
 # – SECTION 6: BOT CLASS —————————————————–
 
